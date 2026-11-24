@@ -24,7 +24,8 @@ input:focus-visible, button:focus-visible, select:focus-visible { outline: 3px s
 
 /* Scanner */
 .video { width: 100%; background: #000; border-radius: 12px; overflow: hidden; min-height: 60px; }
-.video video { display: block; width: 100% !important; max-height: 36vh; object-fit: cover; }
+/* Ne pas recadrer la vidéo (object-fit / max-height) : la zone analysée ne correspondrait plus au viseur affiché. */
+.video video { display: block; width: 100% !important; }
 .reglage { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; }
 .reglage[hidden] { display: none; }
 .reglage > span { width: 48px; font-weight: 600; color: var(--mute); }

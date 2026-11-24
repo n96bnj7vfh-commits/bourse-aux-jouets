@@ -125,7 +125,8 @@ const BJ = (() => {
         if (typeof Html5Qrcode === 'undefined') throw new Error('bibliothèque de scan non chargée (réseau ?)');
         sc = sc || new Html5Qrcode(idVideo, { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], verbose: false });
         await sc.start({ facingMode: 'environment' },
-          { fps: 10, qrbox: (w, h) => { const s = Math.max(80, Math.floor(Math.min(w, h) * VISEURS[viseur])); return { width: s, height: s }; } },
+          // Image en 4:3 « paysage » : moins haute à l'écran, sans recadrage (le viseur reste exact)
+          { fps: 10, aspectRatio: 4 / 3, qrbox: (w, h) => { const s = Math.max(80, Math.floor(Math.min(w, h) * VISEURS[viseur])); return { width: s, height: s }; } },
           lu, () => {});
         actif = true;
         installerZoom();

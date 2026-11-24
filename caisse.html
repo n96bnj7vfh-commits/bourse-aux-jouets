@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Caisse – Bourse aux jouets</title>
+<link rel="stylesheet" href="commun.css">
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="commun.js"></script>
+<style>
+  header { position: sticky; top: 0; z-index: 5; background: var(--ink); color: #fff; padding: 10px 14px 12px; }
+  .haut { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .haut h1 { font-size: 19px; }
+  .menu { background: transparent; border: 0; color: #fff; font-size: 22px; padding: 4px 10px; cursor: pointer; }
+  .total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; }
+  .total .nombre { font-size: clamp(38px, 11vw, 56px); line-height: 1; }
+  main { max-width: 1000px; margin: 0 auto; padding: 12px 14px 110px; display: grid; gap: 12px; }
+  @media (min-width: 820px) { main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+  .saisie { display: flex; gap: 8px; margin-top: 6px; }
+  .saisie input { flex: 1; text-transform: uppercase; }
+  .saisie input::placeholder { text-transform: none; }
+  .panier { list-style: none; margin: 8px 0 0; padding: 0; }
+  .panier li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .panier li:last-child { border-bottom: 0; }
+  .panier .code { font-weight: 700; }
+  .x { border: 0; background: var(--soft); color: var(--err); border-radius: 8px; width: 42px; height: 42px; font-size: 18px; cursor: pointer; flex: none; }
+  .bas { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 30%); z-index: 4; }
+  .bas .btn { max-width: 1000px; margin: 0 auto; display: block; }
+  .apayer { font-size: 72px; margin: 6px 0 16px; }
+  .deux { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #menuBox { position: absolute; right: 10px; top: 48px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 6px; display: grid; min-width: 230px; }
+  #menuBox[hidden] { display: none; }
+  #menuBox button { text-align: left; border: 0; background: none; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: 500; }
+  #menuBox button:hover { background: var(--soft); }
+  @keyframes flash { from { background: rgba(31,138,76,.25); } }
+  .flash { animation: flash .4s ease; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="haut">
+    <h1 id="titre">Caisse</h1>
+    <span class="pastille" id="sync">…</span>
+    <button class="menu" id="menuBtn" aria-label="Menu">⋮</button>
+  </div>
+  <div class="total"><span id="nb">0 article</span><span class="nombre" id="total">0,00 €</span></div>
+  <div id="menuBox" hidden>
+    <button data-m="prix">↻ Recharger les prix</button>
+    <button data-m="camera">📷 Redémarrer la caméra</button>
+    <button data-m="vider">🗑 Vider le panier</button>
+    <button data-m="quitter">⏏ Se déconnecter</button>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <div id="video" class="video"></div>
+    <div id="reglages"></div>
+    <p class="msg mute" id="msg" role="status">Présentez les étiquettes une par une.</p>
+    <div class="saisie">
+      <input id="codeIn" placeholder="QR illisible ? tapez A1-03" autocomplete="off" autocapitalize="characters" enterkeyhint="done">
+      <button class="btn" id="codeBtn">Ajouter</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Panier</h2>
+    <ul class="panier" id="panier"></ul>
+    <p class="note" id="infoPrix"></p>
+  </section>
+</main>
+
+<div class="bas"><button class="btn p big" id="encaisser" disabled>ENCAISSER</button></div>
+
+<!-- Connexion -->
+<div class="plein" id="ecranPin" hidden>
+  <div class="card">
+    <h2>Ouvrir la caisse</h2>
+    <p class="note">Numéro de caisse (donné par l'affichette QR de la table) :</p>
+    <input id="caisseIn" inputmode="numeric" style="width:100%;text-align:center;font-size:22px" placeholder="1">
+    <p class="note" style="margin-top:12px">Code PIN caisse :</p>
+    <input id="pinIn" type="password" inputmode="numeric" autocomplete="off" style="width:100%;text-align:center;font-size:22px;letter-spacing:6px">
+    <p class="msg err" id="pinMsg"></p>
+    <button class="btn p big" id="pinBtn">Ouvrir la caisse</button>
+  </div>
+</div>
+
+<!-- Démarrage après rechargement (le son et la caméra ont besoin d'un appui) -->
+<div class="plein" id="ecranDemarrer" hidden>
+  <div class="card">
+    <h2 id="demTitre">Caisse</h2>
+    <p class="note">Touchez le bouton pour allumer la caméra et le son.</p>
+    <button class="btn p big" id="demBtn" style="margin-top:14px">Démarrer</button>
+  </div>
+</div>
+
+<!-- Paiement -->
+<div class="plein" id="ecranPaiement" hidden>
+  <div class="card">
+    <p class="note" id="payNb"></p>
+    <p class="nombre apayer" id="payTotal"></p>
+    <p class="note" style="margin-bottom:8px">Payé en :</p>
+    <div class="deux">
+      <button class="btn p big" data-pay="especes">Espèces</button>
+      <button class="btn d big" data-pay="cheque">Chèque</button>
+    </div>
+    <button class="btn" id="payRetour" style="margin-top:10px;width:100%">Retour au panier</button>
+  </div>
+</div>
+
+<!-- Caisse fermée -->
+<div class="plein" id="ecranFerme" hidden>
+  <div class="card">
+    <h2>Caisse fermée</h2>
+    <p id="fermeTxt">La caisse s'ouvre quand l'admin passe en mode Vente.</p>
+    <p class="note" id="fermeFile"></p>
+    <button class="btn" id="fermeBtn" style="margin-top:10px;width:100%">Vérifier à nouveau</button>
+  </div>
+</div>
+
+<script>
+(() => {
+const { $, esc, eur, eur2, son } = BJ;
+
+// ---------- État (gardé sur le téléphone pour survivre à un rechargement ou une coupure réseau) ----------
+const lire = (k, def) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? def : v; } catch (e) { return def; } };
+const ecrire = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+
+const params = new URLSearchParams(location.search);
+if (params.get('caisse')) localStorage.setItem('caisse', params.get('caisse').replace(/[^\w-]/g, '').slice(0, 10));
+BJ.session.caisse = localStorage.getItem('caisse') || '';
+BJ.session.pin = localStorage.getItem('pinCaisse') || '';
+
+let cache = lire('prixCache', null);   // { edition, mode, horodatage, articles: { '27-A1-03': [prix, description, statut] } }
+let file = lire('fileVentes', []);     // ventes pas encore confirmées par le serveur
+let panier = lire('panier', []);       // codes complets (27-A1-03)
+let paiementOuvert = false;
+let derniereErreur = '', horsLigne = false;
+
+const scanner = BJ.creerScanner('video', 'reglages', surCode);
+
+// ---------- Affichage ----------
+function message(type, texte) { const m = $('msg'); m.className = 'msg ' + type; m.textContent = texte; }
+const court = c => c.replace(/^\d{2}-/, '');
+const article = c => cache && cache.articles[c];
+const totalPanier = () => panier.reduce((s, c) => s + (article(c) ? article(c)[0] : 0), 0);
+
+function afficherPanier() {
+  ecrire('panier', panier);
+  const t = totalPanier();
+  $('total').textContent = eur2(t);
+  $('nb').textContent = panier.length + (panier.length > 1 ? ' articles' : ' article');
+  $('encaisser').disabled = !panier.length;
+  $('panier').innerHTML = panier.length ? panier.slice().reverse().map((c, i) => {
+    const a = article(c);
+    return `<li class="${i === 0 ? 'flash' : ''}"><span><span class="code">${esc(court(c))}</span><br><span class="note">${esc(a ? a[1] : '')}</span></span>
+      <span style="display:flex;gap:8px;align-items:center"><span class="nombre">${eur(a ? a[0] : null)}</span>
+      <button class="x" data-rm="${esc(c)}" aria-label="Retirer ${esc(court(c))}">✕</button></span></li>`;
+  }).join('') : '<li class="note">Panier vide : client suivant.</li>';
+}
+
+function afficherSync() {
+  const s = $('sync');
+  if (file.length) {
+    s.className = 'pastille ' + (derniereErreur ? 'erreur' : 'attente');
+    s.textContent = (derniereErreur ? '⚠ ' : '⏳ ') + file.length + ' en attente';
+    s.title = derniereErreur || (horsLigne ? 'Pas de réseau : envoi automatique dès le retour' : 'Envoi en cours');
+  } else {
+    s.className = 'pastille';
+    s.textContent = horsLigne ? '✓ Tout envoyé (hors ligne)' : '✓ Tout envoyé';
+    s.title = '';
+  }
+  $('fermeFile').textContent = file.length ? file.length + ' vente(s) encore à envoyer : laissez cette page ouverte.' : '';
+}
+
+function afficherInfoPrix() {
+  if (!cache) { $('infoPrix').textContent = 'Prix non chargés.'; return; }
+  const n = Object.keys(cache.articles).length;
+  const h = new Date(cache.horodatage).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  $('infoPrix').textContent = `${n} articles en mémoire (mis à jour à ${h}).`;
+}
+
+// ---------- Scan ----------
+function surCode(texte) {
+  if (paiementOuvert) { son('doux'); return; }
+  if (!cache) { son('erreur'); return message('err', 'Prix non chargés : vérifiez le réseau.'); }
+  const p = BJ.lireCode(texte);
+  if (p.ed && p.ed !== cache.edition) { son('erreur'); return message('err', `Étiquette d'une autre édition (20${p.ed}) : mettre de côté pour l'admin.`); }
+  if (p.kind === 'grille') { son('erreur'); return message('err', `${p.code} est le QR d'une grille, pas d'un article.`); }
+  if (p.kind !== 'art') { son('erreur'); return message('err', `Code « ${texte} » inconnu.`); }
+  const c = cache.edition + '-' + p.code;
+  if (panier.includes(c)) { son('doux'); return message('warn', `${p.code} est déjà dans le panier.`); }
+  const a = article(c);
+  if (!a) { son('erreur'); return message('err', `${p.code} n'a pas été déposé : mettre de côté pour l'admin.`); }
+  if (a[2] === 'vendu' || file.some(v => v.codes.includes(c))) { son('erreur'); return message('err', `${p.code} est déjà vendu : mettre de côté pour l'admin.`); }
+  panier.push(c);
+  son('ok');
+  message('ok', `+ ${p.code} · ${eur(a[0])}${a[1] ? ' · ' + a[1] : ''}`);
+  afficherPanier();
+}
+
+$('codeBtn').onclick = () => { BJ.debloquerSon(); const v = $('codeIn').value.trim(); if (v) surCode(v); $('codeIn').value = ''; };
+$('codeIn').onkeydown = e => { if (e.key === 'Enter') $('codeBtn').onclick(); };
+$('panier').onclick = e => {
+  const b = e.target.closest('[data-rm]'); if (!b) return;
+  panier = panier.filter(c => c !== b.dataset.rm);
+  message('mute', court(b.dataset.rm) + ' retiré du panier.');
+  afficherPanier();
+};
+
+// ---------- Paiement ----------
+$('encaisser').onclick = () => {
+  if (!panier.length) return;
+  paiementOuvert = true;
+  $('payNb').textContent = 'À payer · ' + panier.length + (panier.length > 1 ? ' articles' : ' article');
+  $('payTotal').textContent = eur2(totalPanier());
+  $('ecranPaiement').hidden = false;
+};
+$('payRetour').onclick = () => { paiementOuvert = false; $('ecranPaiement').hidden = true; };
+document.querySelectorAll('[data-pay]').forEach(b => b.onclick = () => {
+  const vente = { vente_id: BJ.uid(), caisse: BJ.session.caisse, paiement: b.dataset.pay, codes: panier.slice(),
+    total: Math.round(totalPanier() * 100) / 100, heure: new Date().toISOString() };
+  file.push(vente); ecrire('fileVentes', file);   // d'abord en mémoire du téléphone : rien ne se perd
+  panier = [];
+  paiementOuvert = false;
+  $('ecranPaiement').hidden = true;
+  son('caisse');
+  message('ok', `Vente enregistrée (${eur2(vente.total)}, ${b.dataset.pay === 'especes' ? 'espèces' : 'chèque'}). Client suivant !`);
+  afficherPanier(); afficherSync();
+  envoyer();
+});
+
+// ---------- Envoi des ventes (file d'attente, réessais) ----------
+let envoiEnCours = false;
+async function envoyer() {
+  if (envoiEnCours || !file.length || !BJ.session.pin) return afficherSync();
+  envoiEnCours = true;
+  try {
+    while (file.length) {
+      const v = file[0];
+      let r;
+      try { r = await BJ.api('vente', v); } catch (e) { horsLigne = true; break; }
+      horsLigne = false;
+      if (!r.ok) {
+        derniereErreur = r.erreur || 'erreur inconnue';
+        if (/PIN/.test(derniereErreur)) demanderPin('Le code PIN a changé : saisissez le nouveau code.');
+        break;
+      }
+      derniereErreur = '';
+      file.shift(); ecrire('fileVentes', file);
+      v.codes.forEach(c => { if (article(c)) article(c)[2] = 'vendu'; });
+      ecrire('prixCache', cache);
+      if (r.anomalies && r.anomalies.length) message('warn', 'Vente à vérifier par l\'admin : ' + r.anomalies.join(' ; '));
+    }
+  } finally {
+    envoiEnCours = false;
+    afficherSync();
+  }
+}
+setInterval(envoyer, 10000);
+window.addEventListener('online', envoyer);
+
+// ---------- Prix (chargés en mémoire, rafraîchis chaque minute) ----------
+async function chargerPrix() {
+  let r;
+  try { r = await BJ.api('prix'); } catch (e) { horsLigne = true; afficherSync(); return false; }
+  horsLigne = false;
+  if (!r.ok) {
+    if (/PIN/.test(r.erreur)) demanderPin(r.erreur);
+    else message('err', r.erreur);
+    return false;
+  }
+  const articles = {};
+  r.articles.forEach(a => { articles[a[0]] = [a[1], a[2], a[3]]; });
+  cache = { edition: r.edition, mode: r.mode, horodatage: r.horodatage, articles };
+  ecrire('prixCache', cache);
+  afficherInfoPrix(); afficherPanier(); afficherSync();
+  verifierMode();
+  return true;
+}
+setInterval(() => { if (BJ.session.pin && !paiementOuvert) chargerPrix(); }, 60000);
+
+function verifierMode() {
+  const ouverte = cache && cache.mode === 'vente';
+  $('ecranFerme').hidden = ouverte || !$('ecranPin').hidden;
+  if (!ouverte) {
+    $('fermeTxt').textContent = cache && cache.mode === 'restitution'
+      ? 'La vente est terminée (mode Restitution).'
+      : "La caisse s'ouvre quand l'admin passe en mode Vente.";
+    scanner.arreter();
+  } else if ($('ecranDemarrer').hidden && !scanner.actif && !document.hidden) {
+    allumerCamera();
+  }
+}
+$('fermeBtn').onclick = () => chargerPrix();
+
+async function allumerCamera() {
+  try { await scanner.demarrer(); }
+  catch (e) { message('err', 'Caméra impossible : ' + BJ.expliquerErreurCamera(e) + ' (vous pouvez taper les codes).'); }
+}
+
+// ---------- Connexion ----------
+function demanderPin(texte) {
+  scanner.arreter();
+  $('caisseIn').value = BJ.session.caisse;
+  $('pinIn').value = '';
+  $('pinMsg').textContent = texte || '';
+  $('ecranPin').hidden = false;
+  $('ecranFerme').hidden = true;
+}
+$('pinIn').onkeydown = e => { if (e.key === 'Enter') $('pinBtn').onclick(); };
+$('pinBtn').onclick = async () => {
+  BJ.debloquerSon();
+  const caisse = $('caisseIn').value.replace(/[^\w-]/g, '').slice(0, 10);
+  const pin = $('pinIn').value.trim();
+  if (!caisse) return ($('pinMsg').textContent = 'Indiquez le numéro de caisse.');
+  if (!pin) return ($('pinMsg').textContent = 'Tapez le code PIN.');
+  $('pinBtn').disabled = true; $('pinMsg').textContent = '';
+  try {
+    BJ.session.pin = pin; BJ.session.caisse = caisse;
+    const r = await BJ.api('connexion');
+    if (!r.ok) { BJ.session.pin = ''; $('pinMsg').textContent = r.erreur; return; }
+    if (r.role !== 'caisse' && r.role !== 'admin') { BJ.session.pin = ''; $('pinMsg').textContent = "Ce code n'est pas celui de la caisse."; return; }
+    localStorage.setItem('pinCaisse', pin);
+    localStorage.setItem('caisse', caisse);
+    $('ecranPin').hidden = true;
+    demarrerCaisse();
+  } catch (e) {
+    BJ.session.pin = '';
+    $('pinMsg').textContent = 'Pas de réseau : impossible de vérifier le code.';
+  } finally {
+    $('pinBtn').disabled = false;
+  }
+};
+
+async function demarrerCaisse() {
+  $('titre').textContent = 'Caisse ' + BJ.session.caisse;
+  afficherPanier(); afficherInfoPrix(); afficherSync();
+  const ok = await chargerPrix();
+  if (!ok && cache) { message('warn', 'Hors ligne : prix en mémoire utilisés.'); verifierMode(); }
+  envoyer();
+}
+
+// ---------- Menu ----------
+$('menuBtn').onclick = () => { $('menuBox').hidden = !$('menuBox').hidden; };
+$('menuBox').onclick = async e => {
+  const b = e.target.closest('[data-m]'); if (!b) return;
+  $('menuBox').hidden = true;
+  const m = b.dataset.m;
+  if (m === 'prix') { message('mute', 'Chargement des prix…'); if (await chargerPrix()) message('ok', 'Prix à jour.'); }
+  if (m === 'camera') { await scanner.arreter(); allumerCamera(); }
+  if (m === 'vider') { panier = []; afficherPanier(); message('mute', 'Panier vidé.'); }
+  if (m === 'quitter') {
+    if (file.length && !confirm(file.length + " vente(s) pas encore envoyée(s). Elles restent gardées sur ce téléphone et partiront à la prochaine connexion. Se déconnecter quand même ?")) return;
+    localStorage.removeItem('pinCaisse'); BJ.session.pin = '';
+    demanderPin();
+  }
+};
+
+// ---------- Retour sur la page (iPhone coupe la caméra en arrière-plan) ----------
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { scanner.arreter(); return; }
+  if (BJ.session.pin && $('ecranPin').hidden && $('ecranDemarrer').hidden) { chargerPrix(); envoyer(); verifierMode(); }
+});
+window.addEventListener('beforeunload', e => { if (file.length || panier.length) { e.preventDefault(); e.returnValue = ''; } });
+
+// ---------- Démarrage ----------
+afficherPanier(); afficherSync(); afficherInfoPrix();
+if (!BJ.session.pin || !BJ.session.caisse) {
+  demanderPin();
+} else {
+  $('demTitre').textContent = 'Caisse ' + BJ.session.caisse;
+  $('ecranDemarrer').hidden = false;
+  $('demBtn').onclick = () => { BJ.debloquerSon(); $('ecranDemarrer').hidden = true; demarrerCaisse(); };
+}
+})();
+</script>
+</body>
+</html>

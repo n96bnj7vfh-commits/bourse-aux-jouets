@@ -1,0 +1,38 @@
+/* Bourse aux jouets – style commun (reprend la démo validée : encre bleu nuit, accent tomate, gros boutons) */
+:root { --bg: #fbfaf7; --card: #fff; --ink: #18213a; --mute: #5d6478; --line: #e3e1da; --acc: #e8492f;
+  --ok: #1f8a4c; --warn: #b7791f; --err: #c62828; --soft: #f1efe8; }
+* { box-sizing: border-box; min-width: 0; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow-x: clip; }
+h1, h2, h3 { margin: 0; line-height: 1.15; }
+button, input, select { font: inherit; color: inherit; }
+input, select { padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); min-height: 46px; }
+input:focus-visible, button:focus-visible, select:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
+.btn { font-weight: 600; border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 10px 16px; min-height: 46px; cursor: pointer; }
+.btn.p { background: var(--acc); border-color: var(--acc); color: #fff; }
+.btn.d { background: var(--ink); border-color: var(--ink); color: #fff; }
+.btn.big { width: 100%; font-size: 21px; padding: 16px; }
+.btn:disabled { opacity: .4; cursor: default; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+.note { font-size: 13px; color: var(--mute); }
+.msg { min-height: 26px; font-weight: 600; margin: 8px 0; }
+.msg.ok { color: var(--ok); } .msg.warn { color: var(--warn); } .msg.err { color: var(--err); } .msg.mute { color: var(--mute); font-weight: 500; }
+.nombre { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pastille { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 5px 10px; border-radius: 99px; background: rgba(255,255,255,.15); white-space: nowrap; }
+.pastille.attente { background: #f3c84b; color: #18213a; }
+.pastille.erreur { background: var(--err); color: #fff; }
+
+/* Scanner */
+.video { width: 100%; background: #000; border-radius: 12px; overflow: hidden; min-height: 60px; }
+.video video { display: block; width: 100% !important; max-height: 36vh; object-fit: cover; }
+.reglage { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; }
+.reglage[hidden] { display: none; }
+.reglage > span { width: 48px; font-weight: 600; color: var(--mute); }
+.puces { display: flex; gap: 6px; flex: 1; }
+.puces button { flex: 1; padding: 7px 4px; border: 1px solid var(--line); background: var(--soft); border-radius: 99px; font-size: 14px; font-weight: 600; cursor: pointer; min-height: 38px; }
+.puces button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+/* Écran plein (connexion, paiement, caisse fermée) */
+.plein { position: fixed; inset: 0; background: rgba(251,250,247,.97); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+.plein .card { width: min(460px, 100%); text-align: center; }
+.plein[hidden] { display: none; }

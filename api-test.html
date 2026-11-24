@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test du serveur – Bourse aux jouets</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: #f4f4f2; color: #1d1d1b; }
+  header { padding: 12px 16px; background: #1f4e79; color: #fff; }
+  header h1 { margin: 0; font-size: 18px; }
+  main { max-width: 720px; margin: 0 auto; padding: 12px 16px 40px; }
+  label { display: block; font-weight: 600; font-size: 14px; margin: 12px 0 4px; }
+  input, select, textarea { width: 100%; box-sizing: border-box; font-size: 15px; padding: 9px; border: 1px solid #bbb; border-radius: 8px; font-family: inherit; }
+  textarea { font-family: ui-monospace, Consolas, monospace; min-height: 110px; }
+  button { margin-top: 12px; width: 100%; font-size: 17px; padding: 13px; border: 0; border-radius: 10px; background: #2e7d32; color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; }
+  pre { background: #fff; border-radius: 10px; padding: 12px; white-space: pre-wrap; word-break: break-word; font-size: 13px; min-height: 60px; }
+  .ok { border-left: 6px solid #2e7d32; } .ko { border-left: 6px solid #b71c1c; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<header><h1>Test du serveur (Apps Script)</h1></header>
+<main>
+  <label for="url">Adresse de l'application web (se termine par /exec)</label>
+  <input id="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+  <small>Mémorisée sur cet appareil.</small>
+
+  <label for="pin">Code PIN</label>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off">
+  <small>Jamais mémorisé.</small>
+
+  <label for="action">Action</label>
+  <select id="action"></select>
+
+  <label for="params">Paramètres (modifiables)</label>
+  <textarea id="params"></textarea>
+
+  <button id="send">Envoyer</button>
+  <p><small id="time"></small></p>
+  <pre id="out">—</pre>
+</main>
+<script>
+const EXEMPLES = {
+  connexion: {},
+  generer: { lettres: 'A, B', nb: 3 },
+  mode: { mode: 'listing' },
+  grille: { grille: 'A1' },
+  listing: { grille: 'A1', articles: [{ n: 1, prix: 2, description: 'Lego pompiers' }, { n: 2, prix: 0.5 }, { n: 3, prix: 3.5, description: 'Poupée' }] },
+  prix: {},
+  vente: { caisse: '1', vente_id: 'test-' + Date.now(), paiement: 'especes', codes: ['27-A1-01', '27-A1-02'], total: 2.5 },
+  tableau: {},
+  recherche: { q: 'lego' },
+  corriger_prix: { code: 'A1-03', prix: 4, motif: 'erreur de saisie' },
+  annuler_vente: { vente_id: '...', motif: 'test' },
+  restitution: { grilles: 'A1, A2' },
+  restituer: { grilles: 'A1', invendus: 'rendus' },
+  journal: { n: 20 },
+};
+const $ = id => document.getElementById(id);
+for (const a in EXEMPLES) $('action').add(new Option(a, a));
+$('url').value = localStorage.getItem('apiUrl') || '';
+function remplir() {
+  const ex = EXEMPLES[$('action').value];
+  if (ex.vente_id) ex.vente_id = 'test-' + Date.now();
+  $('params').value = JSON.stringify(ex, null, 2);
+}
+$('action').onchange = remplir; remplir();
+let appareil = localStorage.getItem('appareil');
+if (!appareil) { appareil = 'app-' + Math.random().toString(36).slice(2, 10); localStorage.setItem('appareil', appareil); }
+
+$('send').onclick = async () => {
+  const url = $('url').value.trim();
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) { show('Adresse invalide : elle doit commencer par https://script.google.com/macros/s/ et finir par /exec', false); return; }
+  localStorage.setItem('apiUrl', url);
+  let params;
+  try { params = JSON.parse($('params').value || '{}'); } catch (e) { show('Paramètres illisibles : ' + e.message, false); return; }
+  const corps = Object.assign({ action: $('action').value, pin: $('pin').value, appareil }, params);
+  $('send').disabled = true; $('out').textContent = 'Envoi…'; $('out').className = '';
+  const t0 = performance.now();
+  try {
+    // text/plain = requête « simple » : pas de pré-vérification CORS
+    const rep = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(corps) });
+    const data = await rep.json();
+    show(JSON.stringify(data, null, 2), data.ok);
+  } catch (e) {
+    show('Échec réseau : ' + e.message + '\n(vérifiez l\'adresse et que le déploiement est accessible à « Tout le monde »)', false);
+  } finally {
+    $('time').textContent = 'Durée : ' + Math.round(performance.now() - t0) + ' ms';
+    $('send').disabled = false;
+  }
+};
+function show(t, ok) { $('out').textContent = t; $('out').className = ok ? 'ok' : 'ko'; }
+</script>
+</body>
+</html>

@@ -33,6 +33,15 @@
   ol li small { color: #777; }
   .tag-bad { color: #b71c1c; font-weight: 600; }
   .tag-again { color: #8a6d00; }
+  .panel { background: #fff; border-radius: 10px; padding: 8px 12px; margin-top: 8px; }
+  .row { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+  .row > span { width: 52px; font-weight: 600; }
+  .row input[type=range] { flex: 1; height: 32px; }
+  .row b { width: 44px; text-align: right; }
+  .chips { display: flex; gap: 6px; flex: 1; }
+  #zoomChips { margin-top: 6px; padding-left: 62px; }
+  .chips button { flex: 1; padding: 9px 4px; font-size: 15px; background: #e8e8e6; color: #333; }
+  .chips button.on { background: #1f4e79; color: #fff; }
   details { margin-top: 16px; font-size: 13px; color: #555; }
   pre { white-space: pre-wrap; word-break: break-all; }
 </style>
@@ -40,10 +49,22 @@
 <body>
 <header>
   <h1>Test caméra – scan continu</h1>
-  <p>Étape 0 du plan : vérifier le scan des QR sur iPhone et Android.</p>
+  <p>Étape 0 du plan : vérifier le scan des QR sur iPhone et Android. <b>Version 2</b> (zoom + viseur)</p>
 </header>
 <main>
   <div id="reader"></div>
+
+  <div class="panel" id="zoomBox" hidden>
+    <div class="row"><span>Zoom</span><input type="range" id="zoom"><b id="zoomVal">1×</b></div>
+    <div class="chips" id="zoomChips"></div>
+  </div>
+  <div class="panel">
+    <div class="row"><span>Viseur</span>
+      <div class="chips" id="viewChips">
+        <button data-v="petit">Petit</button><button data-v="moyen">Moyen</button><button data-v="grand">Grand</button>
+      </div>
+    </div>
+  </div>
 
   <div class="buttons">
     <button id="start">▶ Démarrer</button>
@@ -149,22 +170,72 @@ async function start() {
     scanner = scanner || new Html5Qrcode('reader', { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], verbose: false });
     await scanner.start(
       { facingMode: 'environment' },
-      { fps: 10, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; } },
+      // Seule la zone du viseur est analysée : un petit viseur évite de lire le QR voisin.
+      { fps: 10, qrbox: (w, h) => { const s = Math.max(80, Math.floor(Math.min(w, h) * VIEWS[view])); return { width: s, height: s }; } },
       onScan,
       () => {} // aucune détection sur cette image : normal, on ignore
     );
     $('stop').disabled = false;
-    setStatus('✅ Caméra active. Présentez les QR un par un.');
+    const zoomOk = setupZoom();
+    setStatus('✅ Caméra active. Présentez les QR un par un.' + (zoomOk ? '' : ' (Zoom non disponible sur ce téléphone : utilisez le petit viseur.)'));
   } catch (e) {
     $('start').disabled = false;
     setStatus('❌ Caméra impossible : ' + explain(e));
     info('Erreur : ' + (e && (e.name || '') + ' ' + (e.message || e)));
   }
 }
-async function stop() {
+async function stop(silent) {
   if (scanner && scanner.isScanning) await scanner.stop();
+  $('zoomBox').hidden = true;
   $('stop').disabled = true; $('start').disabled = false;
-  setStatus('Caméra arrêtée.');
+  if (!silent) setStatus('Caméra arrêtée.');
+}
+
+// ---- Viseur (taille de la zone analysée), mémorisé sur le téléphone ----
+const VIEWS = { petit: 0.4, moyen: 0.6, grand: 0.85 };
+let view = localStorage.getItem('viseur') || 'moyen';
+function showView() {
+  document.querySelectorAll('#viewChips button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
+}
+document.querySelectorAll('#viewChips button').forEach(b => b.onclick = async () => {
+  view = b.dataset.v; localStorage.setItem('viseur', view); showView();
+  if (scanner && scanner.isScanning) { await stop(true); start(); } // le viseur ne change qu'au redémarrage
+});
+showView();
+
+// ---- Zoom de la caméra (si le téléphone le permet), mémorisé sur le téléphone ----
+function setupZoom() {
+  let caps;
+  try { caps = scanner.getRunningTrackCapabilities(); } catch (e) { info('Zoom : lecture impossible (' + e + ')'); return false; }
+  const z = caps && caps.zoom;
+  if (!z || !(z.max > z.min)) { info('Zoom : non pris en charge par ce navigateur'); return false; }
+  const min = z.min, max = Math.min(z.max, 8), step = z.step || 0.1;
+  info(`Zoom : de ${min} à ${z.max} (pas ${step})`);
+  const slider = $('zoom');
+  slider.min = min; slider.max = max; slider.step = step;
+  const saved = parseFloat(localStorage.getItem('zoom'));
+  applyZoom(isNaN(saved) ? min : Math.min(max, Math.max(min, saved)));
+  slider.oninput = () => applyZoom(+slider.value);
+  const chips = $('zoomChips'); chips.innerHTML = '';
+  for (const v of [1, 1.5, 2, 3, 4]) {
+    if (v < min || v > max) continue;
+    const b = document.createElement('button'); b.textContent = v + '×'; b.dataset.z = v;
+    b.onclick = () => applyZoom(v);
+    chips.appendChild(b);
+  }
+  $('zoomBox').hidden = false;
+  return true;
+}
+let zoomTimer = null;
+function applyZoom(v) {
+  $('zoom').value = v;
+  $('zoomVal').textContent = (Math.round(v * 10) / 10) + '×';
+  document.querySelectorAll('#zoomChips button').forEach(b => b.classList.toggle('on', +b.dataset.z === v));
+  localStorage.setItem('zoom', v);
+  clearTimeout(zoomTimer); // on n'envoie pas 50 ordres à la caméra pendant qu'on fait glisser
+  zoomTimer = setTimeout(() => {
+    scanner.applyVideoConstraints({ advanced: [{ zoom: v }] }).catch(e => info('Zoom refusé : ' + e));
+  }, 80);
 }
 function explain(e) {
   const s = String(e && (e.name || e.message || e));
@@ -178,7 +249,7 @@ function setStatus(t) { $('status').textContent = t; }
 function info(t) { $('info').textContent += t + '\n'; }
 
 $('start').onclick = start;
-$('stop').onclick = stop;
+$('stop').onclick = () => stop();
 $('clear').onclick = () => {
   seen.clear(); lastCode = null; counts = { ok: 0, again: 0, bad: 0 };
   $('list').innerHTML = ''; $('last').textContent = '—'; $('last').className = '';

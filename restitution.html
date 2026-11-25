@@ -42,7 +42,12 @@
       <div id="detail"></div>
       <div id="actions" style="margin-top:14px">
         <button class="btn p big" id="rendreBtn">Invendus rendus · marquer restituée(s)</button>
-        <button class="btn" id="donnerBtn" style="width:100%;margin-top:8px">Le vendeur donne ses invendus à une association</button>
+        <button class="btn" id="donnerBtn" style="width:100%;margin-top:8px">Le vendeur donne des invendus à une association…</button>
+        <div id="choixDons" hidden style="margin-top:8px">
+          <p class="note">Cochez dans le tableau les jouets donnés (les autres sont rendus au vendeur).</p>
+          <button class="btn d big" id="validerDonsBtn" style="margin-top:6px">Valider la restitution</button>
+          <button class="btn" id="annulerDonsBtn" style="width:100%;margin-top:6px">Annuler</button>
+        </div>
         <p class="note" id="actionsNote"></p>
       </div>
       <button class="btn d" id="suivantBtn" style="width:100%;margin-top:8px">Vendeur suivant</button>
@@ -118,35 +123,57 @@ function afficher() {
     const etat = g.statut === 'restituee' ? '<span class="tag t-n">déjà restituée</span>' : g.statut === 'vierge' ? '<span class="tag t-err">jamais déposée</span>' : '';
     return `<div class="grille-titre"><h3>${esc(court)} · ${eur2(g.total_vendu)} vendus</h3>${etat}</div>
       <table><thead><tr><th>Article</th><th>Description</th><th class="d">Prix</th><th>Statut</th></tr></thead><tbody>
-      ${lignes.map(a => { const t = ETIQ[a.statut] || [a.statut, 't-n']; return `<tr><td>${esc(a.code.replace(/^\d{2}-/, ''))}</td><td>${esc(a.description)}</td><td class="d">${eur(a.prix)}</td><td><span class="tag ${t[1]}">${t[0]}</span></td></tr>`; }).join('')
+      ${lignes.map(a => {
+        const t = ETIQ[a.statut] || [a.statut, 't-n'];
+        // En mode « dons » : une case à cocher devant chaque invendu
+        const statut = choixDons && a.statut === 'depose'
+          ? `<label style="display:flex;gap:6px;align-items:center;font-weight:600"><input type="checkbox" data-don="${esc(a.code)}" ${dons.has(a.code) ? 'checked' : ''} style="width:22px;height:22px;min-height:0"> donné</label>`
+          : `<span class="tag ${t[1]}">${t[0]}</span>`;
+        return `<tr><td>${esc(a.code.replace(/^\d{2}-/, ''))}</td><td>${esc(a.description)}</td><td class="d">${eur(a.prix)}</td><td>${statut}</td></tr>`; }).join('')
         || '<tr><td colspan="4" class="note">Aucun article déposé.</td></tr>'}
       </tbody></table>`;
   }).join('');
   const aFaire = bilan.grilles.some(g => g.statut !== 'restituee');
   const possible = mode === 'restitution' && aFaire;
+  if (!possible || !aRendre) choixDons = false;
   $('rendreBtn').disabled = $('donnerBtn').disabled = !possible;
-  $('donnerBtn').hidden = !aRendre;
+  $('rendreBtn').hidden = $('donnerBtn').hidden = choixDons;
+  if (!aRendre) $('donnerBtn').hidden = true;
+  $('choixDons').hidden = !choixDons;
+  $('validerDonsBtn').textContent = `Valider : ${dons.size} donné(s), ${aRendre - dons.size} rendu(s)`;
   $('actionsNote').textContent = !aFaire ? 'Toutes ces grilles sont déjà restituées.'
     : mode !== 'restitution' ? 'Consultation seulement : les grilles se marquent restituées en mode Restitution.' : '';
 }
 
-async function restituer(invendus) {
-  const question = invendus === 'donnes'
-    ? 'Les invendus de ' + grilles.join(', ') + ' sont donnés à une association, et les grilles marquées restituées. Confirmer ?'
+// Dons : le vendeur donne en général une partie seulement (jouets anciens, peu chers) : on coche ceux-là
+let choixDons = false;
+const dons = new Set();
+$('detail').onchange = e => {
+  const c = e.target.closest('[data-don]'); if (!c) return;
+  if (c.checked) dons.add(c.dataset.don); else dons.delete(c.dataset.don);
+  $('validerDonsBtn').textContent = `Valider : ${dons.size} donné(s), ${bilan.grilles.reduce((s, g) => s + g.invendus.length, 0) - dons.size} rendu(s)`;
+};
+
+async function restituer(donnes) {
+  const question = donnes.length
+    ? `Restituer ${grilles.join(', ')} : ${donnes.length} jouet(s) donné(s) à une association, les autres invendus rendus au vendeur. Confirmer ?`
     : 'Marquer ' + grilles.join(', ') + ' restituée(s), invendus rendus au vendeur ?';
   if (!confirm(question)) return;
-  $('rendreBtn').disabled = $('donnerBtn').disabled = true;
+  $('rendreBtn').disabled = $('donnerBtn').disabled = $('validerDonsBtn').disabled = true;
   let r;
-  try { r = await BJ.api('restituer', { grilles, invendus }); }
-  catch (e) { son('erreur'); msg('err', 'Pas de réseau : réessayez.'); return afficher(); }
+  try { r = await BJ.api('restituer', { grilles, donnes }); }
+  catch (e) { son('erreur'); msg('err', 'Pas de réseau : réessayez.'); $('validerDonsBtn').disabled = false; return afficher(); }
+  $('validerDonsBtn').disabled = false;
   if (!r.ok) { son('erreur'); msg('err', r.erreur); return afficher(); }
-  bilan = r; son('ok');
+  bilan = r; son('ok'); choixDons = false; dons.clear();
   msg('ok', grilles.join(', ') + ' restituée(s). Somme à verser : ' + eur2(r.a_verser) + '.');
   afficher();
 }
-$('rendreBtn').onclick = () => restituer('rendus');
-$('donnerBtn').onclick = () => restituer('donnes');
-$('suivantBtn').onclick = () => { grilles = []; bilan = null; afficher(); msg('mute', 'Scannez les grilles du vendeur suivant.'); window.scrollTo(0, 0); };
+$('rendreBtn').onclick = () => restituer([]);
+$('donnerBtn').onclick = () => { choixDons = true; dons.clear(); afficher(); };
+$('validerDonsBtn').onclick = () => restituer([...dons]);
+$('annulerDonsBtn').onclick = () => { choixDons = false; dons.clear(); afficher(); };
+$('suivantBtn').onclick = () => { grilles = []; bilan = null; choixDons = false; dons.clear(); afficher(); msg('mute', 'Scannez les grilles du vendeur suivant.'); window.scrollTo(0, 0); };
 
 // ---------- Mode ----------
 async function verifierMode() {

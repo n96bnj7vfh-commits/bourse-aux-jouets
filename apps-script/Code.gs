@@ -11,7 +11,7 @@
  */
 
 // Numéro de version : augmenté à CHAQUE modification de ce fichier (règle du projet).
-const VERSION = '1.3';
+const VERSION = '1.4';
 
 // ---------- Structure du classeur ----------
 const ONGLETS = {
@@ -62,6 +62,11 @@ const ACTIONS = {
   ventes:        { roles: [], fn: aVentes },
   sauvegarde:    { roles: [], ecrit: true, fn: aSauvegarde },
   generer:       { roles: [], ecrit: true, fn: aGenerer },
+  // Listing : toutes les grilles et tous les articles d'un coup (ouverture instantanée d'une grille sur le téléphone)
+  catalogue:     { roles: ['listing'], fn: aCatalogue },
+  // Bac à sable (tests) : seulement en mode Préparation
+  reinitialiser: { roles: [], modes: ['preparation'], ecrit: true, fn: aReinitialiser },
+  donnees_test:  { roles: [], modes: ['preparation'], ecrit: true, fn: aDonneesTest },
 };
 
 // =====================================================================
@@ -338,8 +343,12 @@ function aRestitution(ctx) {
 }
 
 function aRestituer(ctx) {
-  const gs = listeGrilles(ctx.req.grilles, ctx.params.edition);
-  const donnes = ctx.req.invendus === 'donnes';
+  const ed = ctx.params.edition;
+  const gs = listeGrilles(ctx.req.grilles, ed);
+  // Invendus donnés à une association : tous (ancien bouton) ou seulement ceux listés (codes)
+  const tousDonnes = ctx.req.invendus === 'donnes';
+  const donnes = {};
+  (Array.isArray(ctx.req.donnes) ? ctx.req.donnes : []).forEach(function (c) { donnes[lireCodeArticle(c, ed)] = true; });
   const G = charger('Grilles'), A = charger('Articles');
   gs.forEach(function (g) {
     const gi = trouver(G, GCOL.grille, g);
@@ -348,19 +357,20 @@ function aRestituer(ctx) {
   gs.forEach(function (g) {
     const rg = G.lignes[trouver(G, GCOL.grille, g)];
     if (rg[GCOL.statut] === 'restituee') return; // déjà fait : on ne refait rien
-    let n = 0;
+    let nR = 0, nD = 0;
     A.lignes.forEach(function (r) {
       if (r[COL.grille] === g && r[COL.statut] === 'depose') {
-        r[COL.statut] = donnes ? 'donne' : 'restitue';
+        const donne = tousDonnes || donnes[r[COL.code]];
+        r[COL.statut] = donne ? 'donne' : 'restitue';
         r[COL.maj] = new Date();
-        n++;
+        if (donne) nD++; else nR++;
       }
     });
     rg[GCOL.statut] = 'restituee';
     rg[GCOL.restituee_le] = new Date();
-    rg[GCOL.invendus] = n ? (donnes ? 'donnés' : 'rendus') : '';
+    rg[GCOL.invendus] = [nR ? nR + ' rendu(s)' : '', nD ? nD + ' donné(s)' : ''].filter(Boolean).join(', ');
     A.modifie = G.modifie = true;
-    ctx.journal.push(['restitution', court(g), '', 'restituée', n + ' invendu(s) ' + (donnes ? 'donnés' : 'rendus')]);
+    ctx.journal.push(['restitution', court(g), '', 'restituée', nR + ' invendu(s) rendu(s), ' + nD + ' donné(s)']);
   });
   sauver(A); sauver(G);
   return bilanRestitution(gs, G, A, ctx.params.taux);
@@ -587,6 +597,86 @@ function aVentes(ctx) {
   return { ventes: ventes, total: V.lignes.length };
 }
 
+function aCatalogue(ctx) {
+  const A = charger('Articles'), G = charger('Grilles');
+  const grilles = {};
+  G.lignes.forEach(function (r) { grilles[r[GCOL.grille]] = r[GCOL.statut]; });
+  const articles = A.lignes.map(function (r) { return [r[COL.code], r[COL.prix], String(r[COL.description]), r[COL.statut]]; });
+  return { edition: ctx.params.edition, mode: ctx.params.mode, grilles: grilles, articles: articles, horodatage: new Date().toISOString() };
+}
+
+/**
+ * Bac à sable : remise à zéro complète POUR LES TESTS (mode Préparation, confirmation « EFFACER »).
+ * Efface ventes, prix, descriptions et statuts : toutes les grilles redeviennent vierges.
+ * Gardé : les codes de grilles, les PIN, les paramètres et le journal (qui note la remise à zéro).
+ */
+function aReinitialiser(ctx) {
+  if (String(ctx.req.confirmation || '') !== 'EFFACER') throw new Error('Tapez EFFACER pour confirmer la remise à zéro.');
+  return remiseAZero(ctx);
+}
+
+function remiseAZero(ctx) {
+  const V = charger('Ventes');
+  const nbVentes = V.lignes.length;
+  if (nbVentes) V.sh.getRange(2, 1, nbVentes, V.nc).clearContent();
+  const A = charger('Articles');
+  A.lignes.forEach(function (r) {
+    r[COL.description] = ''; r[COL.prix] = ''; r[COL.statut] = 'vierge'; r[COL.vente_id] = ''; r[COL.maj] = '';
+  });
+  A.modifie = A.lignes.length > 0;
+  const G = charger('Grilles');
+  G.lignes.forEach(function (r) {
+    r[GCOL.statut] = 'vierge'; r[GCOL.listee_le] = ''; r[GCOL.restituee_le] = ''; r[GCOL.invendus] = '';
+  });
+  G.modifie = G.lignes.length > 0;
+  sauver(A); sauver(G);
+  ctx.journal.push(['remise_a_zero', '', nbVentes + ' vente(s)', 'tout vierge', A.lignes.length + ' article(s), ' + G.lignes.length + ' grille(s)']);
+  return { ventes: nbVentes, articles: A.lignes.length, grilles: G.lignes.length };
+}
+
+/**
+ * Bac à sable : crée des grilles et les remplit de prix et descriptions au hasard (prêtes à vendre),
+ * et crée d'autres grilles laissées vierges (pour s'entraîner au listing). Mode Préparation seulement.
+ */
+function aDonneesTest(ctx) {
+  const ed = ctx.params.edition;
+  const nb = Math.min(Math.max(Number(ctx.req.nb) || 9, 1), 30);
+  const remplies = String(ctx.req.remplies || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+  const vierges = String(ctx.req.vierges || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+  if (!remplies.length && !vierges.length) throw new Error('Indiquez au moins une lettre.');
+  if (remplies.length) genererGrilles(ed, remplies.join(','), nb, 1);
+  if (vierges.length) genererGrilles(ed, vierges.join(','), nb, 1);
+  const PRIX = [0.5, 0.5, 1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 5, 6, 8, 10, 10, 12, 15, 20, 25, 35];
+  const DESC = ['Puzzle Cars 48 pièces', 'Poupée robe rose', 'Camion de pompiers', 'Lego ville', 'Livre Petit Ours Brun',
+    'Jeu Uno', 'Peluche lapin', 'Voiture télécommandée', 'Dînette en bois', 'Trottinette', 'Playmobil ferme',
+    'Robot musical', 'Ballon de foot', 'Memory animaux', 'Garage voitures', 'Train en bois', 'Déguisement pirate',
+    'Jeu de l\'oie', 'Kapla 100 pièces', 'Tablette éducative', 'Draisienne', 'Cuisine en plastique', '', '', ''];
+  const hasard = function (t) { return t[Math.floor(Math.random() * t.length)]; };
+  const A = charger('Articles'), G = charger('Grilles');
+  const ia = indexer(A, COL.code), ig = indexer(G, GCOL.grille);
+  let nbArticles = 0, nbGrilles = 0;
+  remplies.forEach(function (l) {
+    for (let k = 1; k <= nb; k++) {
+      const g = ed + '-' + l + k;
+      const rg = G.lignes[ig[g]];
+      if (!rg || rg[GCOL.statut] !== 'vierge') continue; // on ne touche pas une grille déjà utilisée
+      const combien = 4 + Math.floor(Math.random() * 5); // 4 à 8 articles
+      for (let n = 1; n <= combien; n++) {
+        const r = A.lignes[ia[g + '-' + deux(n)]];
+        if (!r) continue;
+        r[COL.prix] = hasard(PRIX); r[COL.description] = hasard(DESC); r[COL.statut] = 'depose'; r[COL.maj] = new Date();
+        nbArticles++;
+      }
+      rg[GCOL.statut] = 'listee'; rg[GCOL.listee_le] = new Date();
+      nbGrilles++;
+    }
+  });
+  A.modifie = G.modifie = nbGrilles > 0;
+  sauver(A); sauver(G);
+  ctx.journal.push(['donnees_test', '', '', nbGrilles + ' grille(s) remplie(s)', nbArticles + ' article(s) au hasard ; vierges : ' + vierges.join(', ')]);
+  return { grilles_remplies: nbGrilles, articles: nbArticles };
+}
+
 function aGenerer(ctx) {
   const creees = genererGrilles(ctx.params.edition, ctx.req.lettres, Number(ctx.req.nb), Number(ctx.req.debut) || 1);
   ctx.journal.push(['generation', '', '', creees.length + ' grille(s)', creees.map(court).join(', ').slice(0, 400)]);
@@ -792,6 +882,7 @@ function onOpen() {
     .addItem('4. Sauvegarder maintenant (copie dans Drive)', 'menuSauvegarder')
     .addSeparator()
     .addItem('Tests : effacer les ventes', 'menuEffacerVentes')
+    .addItem('Tests : tout remettre à zéro', 'menuRemiseAZero')
     .addToUi();
 }
 
@@ -878,6 +969,28 @@ function effacerVentes() {
   sauver(A); sauver(G);
   ecrireJournal({ role: 'proprietaire', caisse: '', journal: [['effacement_ventes', '', nbVentes + ' vente(s)', '', n + ' article(s) remis en vente']] });
   return { ventes: nbVentes, articles: n };
+}
+
+function menuRemiseAZero() {
+  const ui = SpreadsheetApp.getUi();
+  if (lireParams().mode !== 'preparation') {
+    ui.alert('Impossible : la remise à zéro ne fonctionne qu\'en mode Préparation (garde-fou pour la vraie bourse).');
+    return;
+  }
+  const rep = ui.prompt('Tout remettre à zéro (tests)',
+    'Ventes, prix, descriptions et statuts seront effacés : toutes les grilles redeviennent vierges.\n' +
+    'Gardés : codes des grilles, PIN, paramètres, journal.\n\nTapez EFFACER pour confirmer :', ui.ButtonSet.OK_CANCEL);
+  if (rep.getSelectedButton() !== ui.Button.OK || rep.getResponseText().trim() !== 'EFFACER') { ui.alert('Annulé : rien n\'a été effacé.'); return; }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(25000);
+  try {
+    const ctx = { role: 'proprietaire', caisse: '', journal: [] };
+    const r = remiseAZero(ctx);
+    ecrireJournal(ctx);
+    ui.alert('Remise à zéro faite ✔\n' + r.ventes + ' vente(s) effacée(s), ' + r.grilles + ' grille(s) redevenue(s) vierge(s).');
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function menuEffacerVentes() {

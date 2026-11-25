@@ -43,12 +43,14 @@
 <body>
 <header class="entete">
   <h1>Listing (dépôt)</h1>
+  <span class="pastille" id="sync" hidden></span>
   <span id="mode"></span>
   <button class="lien" id="quitter">Quitter</button>
 </header>
 
 <main class="page">
   <!-- 1. Scanner la grille -->
+  <div id="rejets"></div>
   <section class="card" id="zoneScan">
     <h2>Scanner la grille</h2>
     <p class="note">Le QR en tête de grille (à côté du code en gros).</p>
@@ -88,19 +90,112 @@ async function ouvrir(brut) {
   if (p.ed && p.ed !== edition) { son('erreur'); return msgScan('err', `Grille d'une autre édition (20${p.ed}) : donner une grille de réserve.`); }
   if (!p.kind) { son('erreur'); return msgScan('err', `« ${brut} » n'est pas un code de grille.`); }
   const court = p.kind === 'art' ? p.code.split('-')[0] : p.code; // un talon scanné ouvre sa grille
-  msgScan('mute', 'Ouverture de ' + court + '…');
-  let r;
-  try { r = await BJ.api('grille', { grille: court }); }
-  catch (e) { son('erreur'); return msgScan('err', 'Pas de réseau : réessayez.'); }
-  if (!r.ok) { son('erreur'); return msgScan('err', r.erreur); }
-  if (r.statut === 'restituee') { son('erreur'); return msgScan('err', court + ' est déjà restituée.'); }
+  if (!cat) { // catalogue pas encore chargé (tout début) : on le charge une fois
+    msgScan('mute', 'Chargement des grilles…');
+    if (!(await chargerCatalogue())) { son('erreur'); return msgScan('err', 'Pas de réseau : impossible de charger les grilles. Réessayez.'); }
+  }
+  // Ouverture instantanée : tout est déjà dans le téléphone (catalogue), sans attendre le serveur
+  const g = edition + '-' + court;
+  const statut = cat.grilles[g];
+  if (statut == null) { son('erreur'); return msgScan('err', `Grille inconnue : ${court} (elle n'a pas été générée).`); }
+  if (statut === 'restituee') { son('erreur'); return msgScan('err', court + ' est déjà restituée.'); }
   son('ok');
-  await scanner.arreter();
-  L = { g: r.grille, court, idx: 0, buf: '', pre: false, recap: r.statut !== 'vierge', edit: false,
-    prix: r.articles.map(a => a.prix), desc: r.articles.map(a => a.description || ''), statuts: r.articles.map(a => a.statut) };
-  L.message = r.statut === 'vierge' ? ['ok', `Grille ${court} ouverte.`] : ['warn', `${court} déjà déposée : vous pouvez la modifier.`];
+  scanner.arreter();
+  const arts = [1, 2, 3, 4, 5, 6, 7, 8].map(n => cat.articles[g + '-' + deux(n)] || ['', '', 'vierge']);
+  L = { g, court, idx: 0, buf: '', pre: false, recap: statut !== 'vierge', edit: false,
+    prix: arts.map(a => a[0] === '' || a[0] == null ? null : Number(a[0])), desc: arts.map(a => String(a[1] || '')), statuts: arts.map(a => a[2]) };
+  L.message = statut === 'vierge' ? ['ok', `Grille ${court} ouverte.`] : ['warn', `${court} déjà déposée : vous pouvez la modifier.`];
   if (!L.recap) allerA(0);
   afficher();
+}
+
+// ---------- Catalogue (toutes les grilles, gardé sur le téléphone) et file d'envoi ----------
+const lire = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
+const ecrire = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+let cat = null;                         // { grilles: { '27-A1': statut }, articles: { '27-A1-03': [prix, desc, statut] } }
+let file = lire('fileListing', []);     // grilles validées pas encore confirmées par le serveur
+let horsLigne = false;
+
+// Applique une grille validée au catalogue local (pour la rouvrir telle quelle avant même la réponse du serveur)
+function appliquer(envoi) {
+  if (!cat) return;
+  const g = edition + '-' + envoi.grille;
+  envoi.articles.forEach(a => {
+    const c = g + '-' + deux(a.n);
+    const ancien = cat.articles[c] || ['', '', 'vierge'];
+    cat.articles[c] = [a.prix, a.description, a.prix === '' ? 'vierge' : (ancien[2] === 'vendu' ? 'vendu' : 'depose')];
+  });
+  const deposes = [1, 2, 3, 4, 5, 6, 7, 8].some(n => (cat.articles[g + '-' + deux(n)] || [])[2] === 'depose');
+  if (cat.grilles[g] !== 'restituee') cat.grilles[g] = deposes ? 'listee' : 'vierge';
+}
+
+async function chargerCatalogue() {
+  let r;
+  try { r = await BJ.api('catalogue'); } catch (e) { horsLigne = true; afficherSync(); return false; }
+  if (!r.ok) return false;
+  horsLigne = false;
+  const articles = {};
+  r.articles.forEach(a => { articles[a[0]] = [a[1], a[2], a[3]]; });
+  cat = { grilles: r.grilles, articles };
+  edition = r.edition;
+  file.forEach(appliquer); // les envois encore en attente restent prioritaires
+  changerMode(r.mode);
+  return true;
+}
+
+function afficherSync() {
+  const s = $('sync');
+  s.hidden = false;
+  if (file.length) { s.className = 'pastille attente'; s.textContent = '⏳ ' + file.length + ' en attente'; }
+  else { s.className = 'pastille'; s.textContent = horsLigne ? '✓ Envoyé (hors ligne)' : '✓ Tout envoyé'; }
+}
+
+let envoiEnCours = false;
+async function envoyer() {
+  if (envoiEnCours || !file.length) return afficherSync();
+  envoiEnCours = true;
+  try {
+    while (file.length) {
+      const e = file[0];
+      let r;
+      try { r = await BJ.api('listing', { grille: e.grille, articles: e.articles }); } catch (err) { horsLigne = true; break; }
+      horsLigne = false;
+      if (!r.ok) {
+        if (/occupé|PIN|Session/i.test(r.erreur || '')) break;       // passager : on réessaiera
+        if (/mode actuel/.test(r.erreur || '')) {                    // listing fermé : toutes les grilles en attente sont perdues pour le serveur
+          file.forEach(x => rejeter(x, 'le listing a été fermé avant l\'envoi'));
+          file = []; ecrire('fileListing', file);
+          verifierMode();
+          break;
+        }
+        rejeter(e, r.erreur);                                        // refus définitif : ne bloque pas les suivantes
+      }
+      file.shift(); ecrire('fileListing', file);
+    }
+  } finally {
+    envoiEnCours = false;
+    afficherSync();
+  }
+}
+setInterval(envoyer, 8000);
+window.addEventListener('online', envoyer);
+
+// Grilles refusées par le serveur : affichées avec leurs prix, à transmettre à l'admin (correction de prix)
+function rejeter(envoi, raison) {
+  const r = lire('rejetsListing', []);
+  r.push({ grille: envoi.grille, raison, articles: envoi.articles.filter(a => a.prix !== '') });
+  ecrire('rejetsListing', r);
+  son('erreur');
+  afficherRejets();
+}
+function afficherRejets() {
+  const r = lire('rejetsListing', []);
+  $('rejets').innerHTML = r.length ? `<div class="card" style="border:2px solid var(--err)">
+    <h3 style="color:var(--err)">⚠ Grille(s) NON enregistrée(s)</h3>
+    <p class="note">À transmettre à l'admin, qui saisira les prix (Admin > Corriger le prix) :</p>
+    ${r.map(x => `<p style="margin:6px 0"><b>${esc(x.grille)}</b> (${esc(x.raison)}) : ${x.articles.map(a => esc(x.grille + '-' + deux(a.n)) + ' ' + eur(Number(a.prix))).join(' · ') || 'aucun prix'}</p>`).join('')}
+    <button class="btn" id="rejetsOk" style="width:100%;margin-top:6px">C'est transmis : effacer cette liste</button></div>` : '';
+  if (r.length) $('rejetsOk').onclick = () => { ecrire('rejetsListing', []); afficherRejets(); };
 }
 $('grilleBtn').onclick = () => { const v = $('grilleIn').value.trim(); if (v) ouvrir(v); $('grilleIn').value = ''; };
 $('grilleIn').onkeydown = e => { if (e.key === 'Enter') $('grilleBtn').onclick(); };
@@ -145,23 +240,23 @@ function action(a, v) {
   afficher();
 }
 
-async function enregistrer() {
+function enregistrer() {
   const n = L.prix.filter(v => v != null).length;
   if (!n) { L.message = ['err', 'Aucun prix saisi : saisissez au moins un prix, ou « Abandonner ».']; son('erreur'); return afficher(); }
-  const bouton = $('zoneGrille').querySelector('[data-a=enregistrer]');
-  bouton.disabled = true; bouton.textContent = 'Enregistrement…';
   const articles = L.prix.map((p, i) => ({ n: i + 1, prix: p == null ? '' : p, description: L.desc[i] }))
     .filter((a, i) => !vendu(i));
-  let r;
-  try { r = await BJ.api('listing', { grille: L.court, articles }); }
-  catch (e) { L.message = ['err', 'Pas de réseau : rien n\'est perdu, réessayez « Valider la grille ».']; son('erreur'); return afficher(); }
-  if (!r.ok) { L.message = ['err', r.erreur]; son('erreur'); return afficher(); }
+  // Pas d'attente : la grille part dans la file d'envoi (gardée sur le téléphone), le bénévole enchaîne
+  const envoi = { grille: L.court, articles, t: Date.now() };
+  file = file.filter(x => x.grille !== envoi.grille); // une grille revalidée remplace l'envoi précédent
+  file.push(envoi); ecrire('fileListing', file);
+  appliquer(envoi);
   const total = L.prix.reduce((s, v) => s + (v || 0), 0);
   son('ok');
-  msgScan('ok', `${L.court} enregistrée : ${n} article(s), ${eur2(total)}. Grille suivante !`);
+  msgScan('ok', `${L.court} validée : ${n} article(s), ${eur2(total)}. Grille suivante !`);
   L = null;
-  afficher();
+  afficher(); afficherSync();
   scanner.demarrer().catch(e => msgScan('err', 'Caméra : ' + BJ.expliquerErreurCamera(e)));
+  envoyer();
 }
 
 // ---------- Affichage ----------
@@ -198,28 +293,51 @@ function afficher() {
 }
 $('zoneGrille').onclick = e => { const b = e.target.closest('[data-a]'); if (b && !b.disabled) action(b.dataset.a, b.dataset.v); };
 
-// ---------- Mode ----------
+// ---------- Mode : vérifié toutes les 15 s, l'écran se bloque dès que l'admin quitte le Listing ----------
+function changerMode(m) {
+  if (m && m !== '?') mode = m;
+  $('mode').innerHTML = BJ.badgeMode(mode);
+  const ouvert = mode === 'listing' && m !== '?';
+  if (ouvert) {
+    if (!$('ferme').hidden) { $('ferme').hidden = true; if (!L && !scanner.actif && !document.hidden) scanner.demarrer().catch(() => {}); }
+    return;
+  }
+  if (!$('ferme').hidden) return;
+  const enCours = L ? `La grille ${L.court} en cours n'a PAS été enregistrée : notez ses prix pour l'admin.` : '';
+  $('fermeTxt').innerHTML = `L'admin est passé en mode « <b>${esc((BJ.MODES[mode] || [mode])[0])}</b> » : la saisie des prix est terminée.` +
+    (enCours ? `<br><br><b style="color:var(--err)">${esc(enCours)}</b>` : '') +
+    (file.length ? `<br><br>${file.length} grille(s) validée(s) n'ont pas pu partir : elles s'affichent en rouge, à transmettre à l'admin.` : '');
+  $('ferme').hidden = false;
+  son('erreur');
+  scanner.arreter();
+  if (file.length) envoyer();
+}
 async function verifierMode() {
   let r;
   try { r = await BJ.api('connexion'); } catch (e) { return; }
   if (!r.ok) return;
-  mode = r.mode; edition = r.edition;
-  $('mode').innerHTML = BJ.badgeMode(mode);
-  const ouvert = mode === 'listing';
-  $('ferme').hidden = ouvert;
-  $('fermeTxt').textContent = `L'application est en mode « ${(BJ.MODES[mode] || [mode])[0]} » : les prix ne se saisissent qu'en mode Listing (choisi par l'admin).`;
-  if (!ouvert) scanner.arreter();
-  else if (!L && !scanner.actif && !document.hidden) scanner.demarrer().catch(e => msgScan('err', 'Caméra : ' + BJ.expliquerErreurCamera(e) + ' (vous pouvez taper le code).'));
+  edition = r.edition;
+  changerMode(r.mode);
 }
-$('fermeBtn').onclick = verifierMode;
-$('quitter').onclick = () => BJ.deconnexion('jetonListing');
-document.addEventListener('visibilitychange', () => { if (document.hidden) scanner.arreter(); else verifierMode(); });
+setInterval(() => { if (!document.hidden) verifierMode(); }, 15000);
+setInterval(() => { if (!document.hidden && !L && mode === 'listing') chargerCatalogue(); }, 60000);
+$('fermeBtn').onclick = async () => { await verifierMode(); if (mode === 'listing') { await chargerCatalogue(); } };
+$('quitter').onclick = () => {
+  if (file.length && !confirm(file.length + ' grille(s) pas encore envoyée(s) : elles partiront à la prochaine connexion. Quitter quand même ?')) return;
+  BJ.deconnexion('jetonListing');
+};
+document.addEventListener('visibilitychange', () => { if (document.hidden) scanner.arreter(); else { verifierMode(); envoyer(); } });
+window.addEventListener('beforeunload', e => { if (file.length) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- Démarrage ----------
 const r = await BJ.connexion({ titre: 'Listing (dépôt)', roles: ['listing'], cle: 'jetonListing' });
-edition = r.edition;
+edition = r.edition; mode = r.mode;
+afficherRejets(); afficherSync();
 msgScan('mute', 'Présentez le QR de la grille.');
-await verifierMode();
+await chargerCatalogue();
+changerMode(mode);
+if (mode === 'listing' && !scanner.actif && !document.hidden) scanner.demarrer().catch(e => msgScan('err', 'Caméra : ' + BJ.expliquerErreurCamera(e) + ' (vous pouvez taper le code).'));
+envoyer();
 })();
 </script>
 </body>

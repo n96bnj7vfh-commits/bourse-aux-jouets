@@ -18,6 +18,13 @@ Relecture du dépôt GitHub `n96bnj7vfh-commits/bourse-aux-jouets` (commit « Fu
   *Fait (v1.3) : bouton « Retour d'article » sur chaque vente et « Retour » dans la recherche (qui affiche heure, caisse, moyen de paiement et prix de la vente d'origine). Motif obligatoire, montant à rembourser indiqué (SumUp pour la carte), tableau de bord et caisses corrigés. Refusé si la grille est restituée (vendeur déjà payé).*
 - [x] (retour test iPhone) Écran Listing : tout tient sur un écran (8 articles sur une ligne, pavé compact, « Valider ce prix » et Précédent / Passer / Fin de grille fixés en bas, au-dessus de la barre de Safari).
 
+## Retours des tests du 25/11/2026 (v1.4)
+- [x] Listing fluide : ouverture d'une grille instantanée (toutes les grilles sont gardées sur le téléphone) et « Valider la grille » sans attente (envoi en arrière-plan, pastille « ⏳ N en attente / ✓ Tout envoyé »).
+- [x] Listing fermé dès que l'admin quitte le mode Listing (vérifié toutes les 15 s) : fenêtre « la saisie des prix est terminée ». Une grille validée qui n'a pas pu partir à temps s'affiche en rouge avec ses prix, à transmettre à l'admin (correction de prix).
+- [x] Caisse : menu ⋮ > « Changer le numéro de caisse » (ex. une caisse carte/chèque, une caisse espèces).
+- [x] Restitution : « Le vendeur donne des invendus… » → on coche les jouets donnés, les autres sont rendus. *(Option peut-être supprimée plus tard : à voir avec le bureau.)*
+- [x] Bac à sable (Admin, mode Préparation uniquement) : « Tout remettre à zéro » (confirmation EFFACER ; PIN, paramètres, codes de grilles et journal gardés) et « Créer les données de test » (ex. A1-A9 remplies au hasard, B1-B9 vierges pour s'entraîner au listing). Aussi dans le menu du Sheet.
+
 ## Jouet sans talon (talon décollé ou arraché)
 Idée des photos au listing **écartée le 25/11/2026** : trop de photos à parcourir, ralentit le dépôt, la recherche par description fait déjà le tri. Consignes retenues à la place :
 - En caisse : jouet sans talon mis de côté ; l'admin cherche par mot de la description et le vend s'il n'y a pas de doute.

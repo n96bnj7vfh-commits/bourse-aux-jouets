@@ -40,6 +40,22 @@
     <p class="msg" id="msgMode"></p>
   </section>
 
+  <section class="card" id="bacASable" style="border:2px dashed var(--warn)">
+    <h2>🧪 Bac à sable (tests)</h2>
+    <p class="note">Pour les essais avec le bureau. Fonctionne uniquement en mode <b>Préparation</b> (garde-fou pour la vraie bourse). Les codes PIN, les paramètres et le journal sont toujours gardés.</p>
+    <div class="rangee" style="margin-top:10px">
+      <button class="btn" id="razBtn">♻ Tout remettre à zéro</button>
+      <span class="note">ventes, prix et descriptions effacés, toutes les grilles redeviennent vierges</span>
+    </div>
+    <div class="rangee" style="margin-top:10px">
+      <label class="note">Grilles remplies au hasard (prêtes à vendre) : lettres <input id="testRemplies" value="A" style="width:90px"></label>
+      <label class="note">Grilles vierges (pour s'entraîner au listing) : lettres <input id="testVierges" value="B" style="width:90px"></label>
+      <label class="note">de 1 à <input id="testNb" inputmode="numeric" value="9" style="width:60px"></label>
+      <button class="btn d" id="testBtn">Créer les données de test</button>
+    </div>
+    <p class="msg" id="msgSable"></p>
+  </section>
+
   <section>
     <div class="stats" id="stats"></div>
   </section>
@@ -132,7 +148,23 @@ async function appel(action, params, idMsg) {
 }
 
 // ---------- Mode ----------
+// ---------- Bac à sable ----------
+$('razBtn').onclick = async () => {
+  if (mode !== 'preparation') return msg('msgSable', 'err', 'Passez d\'abord en mode Préparation.');
+  const c = prompt('TOUT remettre à zéro : ventes, prix, descriptions et statuts effacés, toutes les grilles redeviennent vierges.\n(Gardés : codes des grilles, PIN, paramètres, journal.)\n\nTapez EFFACER pour confirmer :');
+  if (c == null) return;
+  const r = await appel('reinitialiser', { confirmation: c.trim() }, 'msgSable');
+  if (r.ok) { msg('msgSable', 'ok', `Remise à zéro faite : ${r.ventes} vente(s) effacée(s), ${r.grilles} grille(s) vierge(s). Sur les téléphones de caisse : ⋮ > Recharger les prix.`); toutCharger(); }
+};
+$('testBtn').onclick = async () => {
+  if (mode !== 'preparation') return msg('msgSable', 'err', 'Passez d\'abord en mode Préparation.');
+  msg('msgSable', 'mute', 'Création des données de test…');
+  const r = await appel('donnees_test', { remplies: $('testRemplies').value, vierges: $('testVierges').value, nb: Number($('testNb').value) }, 'msgSable');
+  if (r.ok) { msg('msgSable', 'ok', `${r.grilles_remplies} grille(s) remplie(s) avec ${r.articles} article(s) au hasard. Imprimez les grilles (section « Grilles à imprimer ») et passez en mode Listing ou Vente pour tester.`); toutCharger(); }
+};
+
 function afficherModes() {
+  $('bacASable').style.opacity = mode === 'preparation' ? '1' : '.55';
   $('mode').innerHTML = BJ.badgeMode(mode);
   $('modes').innerHTML = ORDRE.map(m => `<button class="chip ${m === mode ? 'on' : ''}" data-m="${m}">${esc(BJ.MODES[m][0])}</button>`).join('');
 }

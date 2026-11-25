@@ -47,6 +47,7 @@
   </div>
   <div class="total"><span id="nb">0 article</span><span class="nombre" id="total">0,00 €</span></div>
   <div id="menuBox" hidden>
+    <button data-m="numero">🔢 Changer le numéro de caisse</button>
     <button data-m="prix">↻ Recharger les prix</button>
     <button data-m="camera">📷 Redémarrer la caméra</button>
     <button data-m="vider">🗑 Vider le panier</button>
@@ -376,6 +377,15 @@ $('menuBox').onclick = async e => {
   const b = e.target.closest('[data-m]'); if (!b) return;
   $('menuBox').hidden = true;
   const m = b.dataset.m;
+  if (m === 'numero') {
+    const n = prompt('Numéro de cette caisse (ex. 1, 2, 3…) :', BJ.session.caisse);
+    if (n == null) return;
+    const c = n.replace(/[^\w-]/g, '').slice(0, 10);
+    if (!c) return message('err', 'Numéro de caisse invalide.');
+    BJ.session.caisse = c; localStorage.setItem('caisse', c);
+    $('titre').textContent = 'Caisse ' + c;
+    message('ok', 'Ce téléphone est maintenant la caisse ' + c + ' (les ventes déjà faites gardent leur numéro).');
+  }
   if (m === 'prix') { message('mute', 'Chargement des prix…'); if (await chargerPrix()) message('ok', 'Prix à jour.'); }
   if (m === 'camera') { await scanner.arreter(); allumerCamera(); }
   if (m === 'vider') { panier = []; afficherPanier(); message('mute', 'Panier vidé.'); }

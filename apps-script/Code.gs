@@ -11,24 +11,27 @@
  */
 
 // Numéro de version : augmenté à CHAQUE modification de ce fichier (règle du projet).
-const VERSION = '1.6';
+const VERSION = '1.7';
 
 // ---------- Structure du classeur ----------
 const ONGLETS = {
   Parametres: ['cle', 'valeur', 'note'],
-  Grilles: ['grille', 'statut', 'listee_le', 'restituee_le', 'invendus', 'imprimee_le'],
+  Grilles: ['grille', 'statut', 'listee_le', 'restituee_le', 'invendus', 'imprimee_le',
+    'droit_paiement', 'droit_montant', 'droit_le', 'verse_mode', 'verse_montant'],
   Articles: ['code', 'grille', 'n', 'description', 'prix', 'statut', 'vente_id', 'maj'],
   Ventes: ['vente_id', 'recue_le', 'heure_caisse', 'caisse', 'paiement', 'nb', 'total', 'total_caisse', 'codes', 'statut', 'motif', 'anomalies', 'rembourse', 'retours'],
   Journal: ['date', 'role', 'caisse', 'action', 'cible', 'ancien', 'nouveau', 'detail'],
 };
 const COL = { code: 0, grille: 1, n: 2, description: 3, prix: 4, statut: 5, vente_id: 6, maj: 7 };
-const GCOL = { grille: 0, statut: 1, listee_le: 2, restituee_le: 3, invendus: 4, imprimee_le: 5 };
+const GCOL = { grille: 0, statut: 1, listee_le: 2, restituee_le: 3, invendus: 4, imprimee_le: 5,
+  droit_paiement: 6, droit_montant: 7, droit_le: 8, verse_mode: 9, verse_montant: 10 };
 const VCOL = { id: 0, recue_le: 1, heure_caisse: 2, caisse: 3, paiement: 4, nb: 5, total: 6, total_caisse: 7, codes: 8, statut: 9, motif: 10, anomalies: 11, rembourse: 12, retours: 13 };
 // Nouvelles colonnes : toujours AJOUTÉES À LA FIN (le code lit les colonnes par position).
 const PARAMS_DEFAUT = [
   ['edition', '27', "2 derniers chiffres de l'année (27 = 2027)"],
   ['mode', 'preparation', 'preparation, listing, vente, restitution ou cloture'],
   ['taux', '0.15', "part retenue par l'association (0.15 = 15 %)"],
+  ['droit_grille', '2', 'droit de dépôt payé par le vendeur, en euros par grille'],
 ];
 // Statuts d'article : vierge (imprimé), depose (prix saisi), vendu, restitue (rendu au vendeur), donne (donné à une asso)
 
@@ -64,6 +67,9 @@ const ACTIONS = {
   sauvegarde:    { roles: [], ecrit: true, fn: aSauvegarde },
   generer:       { roles: [], ecrit: true, fn: aGenerer },
   impression:    { roles: [], ecrit: true, fn: aImpression },
+  // Micro-caisse du dépôt (droits de 2 € par grille), avec le code listing
+  droits_info:   { roles: ['listing'], modes: ['listing', 'vente'], fn: aDroitsInfo },
+  droits:        { roles: ['listing'], modes: ['listing', 'vente'], ecrit: true, fn: aDroits },
   // Listing : toutes les grilles et tous les articles d'un coup (ouverture instantanée d'une grille sur le téléphone)
   catalogue:     { roles: ['listing'], fn: aCatalogue },
   // Bac à sable (tests) : seulement en mode Préparation
@@ -360,9 +366,24 @@ function aRestituer(ctx) {
     const gi = trouver(G, GCOL.grille, g);
     if (gi < 0) throw new Error('Grille inconnue : ' + court(g));
   });
+  // Paiement du vendeur (espèces ou chèque) : obligatoire s'il y a quelque chose à lui verser
+  const avant = bilanRestitution(gs, G, A, ctx.params.taux);
+  const aPayer = avant.grilles.filter(function (d) { return d.statut !== 'restituee' && d.total_vendu > 0; });
+  const mode = String(ctx.req.paiement_vendeur || '');
+  if (aPayer.length && ['especes', 'cheque'].indexOf(mode) < 0) throw new Error('Indiquez comment le vendeur est payé : espèces ou chèque.');
+  // Part de chaque grille dans la somme versée (au centime, l'écart d'arrondi va sur la dernière)
+  const parts = {};
+  const totalAPayer = arrondi(aPayer.reduce(function (s, d) { return s + d.total_vendu; }, 0));
+  const aVerser = arrondi(totalAPayer - arrondi(totalAPayer * ctx.params.taux));
+  let reparti = 0;
+  aPayer.forEach(function (d, i) {
+    const p = i === aPayer.length - 1 ? arrondi(aVerser - reparti) : arrondi(d.total_vendu * (1 - ctx.params.taux));
+    parts[d.grille] = p; reparti = arrondi(reparti + p);
+  });
   gs.forEach(function (g) {
     const rg = G.lignes[trouver(G, GCOL.grille, g)];
     if (rg[GCOL.statut] === 'restituee') return; // déjà fait : on ne refait rien
+    if (parts[g] != null) { rg[GCOL.verse_mode] = mode; rg[GCOL.verse_montant] = parts[g]; }
     let nR = 0, nD = 0;
     A.lignes.forEach(function (r) {
       if (r[COL.grille] === g && r[COL.statut] === 'depose') {
@@ -376,7 +397,8 @@ function aRestituer(ctx) {
     rg[GCOL.restituee_le] = new Date();
     rg[GCOL.invendus] = [nR ? nR + ' rendu(s)' : '', nD ? nD + ' donné(s)' : ''].filter(Boolean).join(', ');
     A.modifie = G.modifie = true;
-    ctx.journal.push(['restitution', court(g), '', 'restituée', nR + ' invendu(s) rendu(s), ' + nD + ' donné(s)']);
+    ctx.journal.push(['restitution', court(g), '', 'restituée', nR + ' invendu(s) rendu(s), ' + nD + ' donné(s)' +
+      (parts[g] != null ? ' ; versé ' + String(parts[g]).replace('.', ',') + ' € (' + (mode === 'cheque' ? 'chèque' : 'espèces') + ')' : '')]);
   });
   sauver(A); sauver(G);
   return bilanRestitution(gs, G, A, ctx.params.taux);
@@ -451,12 +473,40 @@ function aTableau(ctx) {
     k[r[VCOL.paiement]] = arrondi((k[r[VCOL.paiement]] || 0) + encaisse);
   });
   ca = arrondi(ca);
+  // Grilles : droits de dépôt (samedi) et versements aux vendeurs (soir)
+  const G = charger('Grilles');
+  const venduParGrille = {};
+  A.lignes.forEach(function (r) { if (r[COL.statut] === 'vendu') venduParGrille[r[COL.grille]] = (venduParGrille[r[COL.grille]] || 0) + (Number(r[COL.prix]) || 0); });
+  const droits = { especes: 0, cheque: 0, carte: 0, total: 0, payees: 0, non_payees: [] };
+  const verse = { especes: 0, cheque: 0, total: 0, restituees: 0, a_restituer: [], reste_a_verser: 0 };
+  let listees = 0;
+  G.lignes.forEach(function (r) {
+    const g = r[GCOL.grille], st = r[GCOL.statut];
+    if (st !== 'vierge') listees++;
+    if (r[GCOL.droit_paiement]) {
+      const m = Number(r[GCOL.droit_montant]) || 0;
+      droits[r[GCOL.droit_paiement]] = arrondi((droits[r[GCOL.droit_paiement]] || 0) + m);
+      droits.total = arrondi(droits.total + m); droits.payees++;
+    } else if (st !== 'vierge') droits.non_payees.push(court(g));
+    if (st === 'restituee') {
+      verse.restituees++;
+      if (r[GCOL.verse_mode]) {
+        const m = Number(r[GCOL.verse_montant]) || 0;
+        verse[r[GCOL.verse_mode]] = arrondi((verse[r[GCOL.verse_mode]] || 0) + m);
+        verse.total = arrondi(verse.total + m);
+      }
+    } else if (venduParGrille[g]) {
+      const du = arrondi(venduParGrille[g] - arrondi(venduParGrille[g] * taux));
+      verse.a_restituer.push({ grille: court(g), du: du });
+      verse.reste_a_verser = arrondi(verse.reste_a_verser + du);
+    }
+  });
   return {
-    mode: ctx.params.mode, edition: ctx.params.edition, taux: taux, version: VERSION,
+    mode: ctx.params.mode, edition: ctx.params.edition, taux: taux, version: VERSION, droit_grille: ctx.params.droit_grille,
     articles: articles, ventes: nb, a_verifier: aVerifier, annulees: annulees, rembourse: arrondi(rembourse),
     stock: { deposes: nbDeposes, valeur_deposee: arrondi(valeurDeposee), en_vente: nbEnVente, valeur_en_vente: arrondi(valeurEnVente) },
     total_vendu: arrondi(ca), part_asso: arrondi(ca * taux), part_vendeurs: arrondi(ca - arrondi(ca * taux)),
-    caisses: caisses,
+    caisses: caisses, grilles: { total: G.lignes.length, listees: listees }, droits: droits, verse: verse,
   };
 }
 
@@ -641,6 +691,7 @@ function remiseAZero(ctx) {
   const G = charger('Grilles');
   G.lignes.forEach(function (r) {
     r[GCOL.statut] = 'vierge'; r[GCOL.listee_le] = ''; r[GCOL.restituee_le] = ''; r[GCOL.invendus] = '';
+    r[GCOL.droit_paiement] = ''; r[GCOL.droit_montant] = ''; r[GCOL.droit_le] = ''; r[GCOL.verse_mode] = ''; r[GCOL.verse_montant] = '';
   });
   G.modifie = G.lignes.length > 0;
   sauver(A); sauver(G);
@@ -698,6 +749,46 @@ function aDonneesTest(ctx) {
  *  - sinon → note la date d'impression des grilles demandées (après confirmation côté Admin).
  * Renvoie aussi un résumé par lettre et le prochain numéro jamais imprimé.
  */
+/** Micro-caisse du dépôt : état des grilles d'un vendeur (listée ? droit déjà payé ?) et montant dû. */
+function aDroitsInfo(ctx) {
+  const gs = listeGrilles(ctx.req.grilles, ctx.params.edition);
+  const G = charger('Grilles');
+  const ig = indexer(G, GCOL.grille);
+  const grilles = gs.map(function (g) {
+    const r = G.lignes[ig[g]];
+    if (!r) throw new Error('Grille inconnue : ' + court(g) + " (elle n'a pas été générée).");
+    return { grille: court(g), statut: r[GCOL.statut], paye: !!r[GCOL.droit_paiement], paiement: r[GCOL.droit_paiement], le: r[GCOL.droit_le] };
+  });
+  const aPayer = grilles.filter(function (x) { return !x.paye; }).length;
+  return { grilles: grilles, droit_grille: ctx.params.droit_grille, a_payer: aPayer, montant: arrondi(aPayer * ctx.params.droit_grille) };
+}
+
+/** Micro-caisse du dépôt : encaisse les droits des grilles pas encore payées. */
+function aDroits(ctx) {
+  const paiement = String(ctx.req.paiement || '');
+  if (PAIEMENTS.indexOf(paiement) < 0) throw new Error('Moyen de paiement invalide.');
+  const gs = listeGrilles(ctx.req.grilles, ctx.params.edition);
+  const G = charger('Grilles');
+  const ig = indexer(G, GCOL.grille);
+  const payees = [], deja = [];
+  const maintenant = new Date(), droit = ctx.params.droit_grille;
+  gs.forEach(function (g) {
+    const r = G.lignes[ig[g]];
+    if (!r) throw new Error('Grille inconnue : ' + court(g));
+  });
+  gs.forEach(function (g) {
+    const r = G.lignes[ig[g]];
+    if (r[GCOL.droit_paiement]) { deja.push(court(g)); return; }
+    r[GCOL.droit_paiement] = paiement; r[GCOL.droit_montant] = droit; r[GCOL.droit_le] = maintenant;
+    payees.push(court(g));
+  });
+  G.modifie = payees.length > 0;
+  sauver(G);
+  const total = arrondi(payees.length * droit);
+  if (payees.length) ctx.journal.push(['droits_depot', payees.join(', '), '', total + ' €', paiement]);
+  return { payees: payees, deja: deja, total: total };
+}
+
 function aImpression(ctx) {
   const ed = ctx.params.edition;
   const vide = !ctx.req.grilles || (Array.isArray(ctx.req.grilles) && !ctx.req.grilles.length);
@@ -717,7 +808,21 @@ function aImpression(ctx) {
     sauver(G);
     ctx.journal.push(['impression', '', '', liste.length + ' grille(s)', liste.map(court).join(', ').slice(0, 300) + (deja.length ? ' (dont ' + deja.length + ' réimprimée(s))' : '')]);
   }
-  return { deja: deja, resume: resumeImpressions(G) };
+  const historique = historiqueImpressions();
+  // L'impression en cours n'est écrite au journal qu'après cette réponse : on l'ajoute en tête
+  if (!ctx.req.verifier) historique.unshift({ le: new Date(), nombre: liste.length + ' grille(s)', grilles: liste.map(court).join(', ').slice(0, 300) });
+  return { deja: deja, resume: resumeImpressions(G), historique: historique.slice(0, 30) };
+}
+
+// Les 30 dernières impressions (lues dans le journal) : date et grilles
+function historiqueImpressions() {
+  const sh = feuille('Journal');
+  const der = sh.getLastRow();
+  if (der < 2) return [];
+  const debut = Math.max(2, der - 1999);
+  const v = sh.getRange(debut, 1, der - debut + 1, ONGLETS.Journal.length).getValues();
+  return v.filter(function (l) { return l[3] === 'impression'; }).slice(-30).reverse()
+    .map(function (l) { return { le: l[0], nombre: l[6], grilles: l[7] }; });
 }
 
 // Par lettre : nombre de grilles imprimées et prochain numéro jamais imprimé (ex. { A: { imprimees: 50, suivant: 51 } })
@@ -758,7 +863,8 @@ function genererGrilles(ed, lettres, nb, debut) {
       const g = ed + '-' + l + k;
       if (existe[g] != null) continue;
       creees.push(g);
-      G.nouvelles.push([g, 'vierge', '', '', '', '']);
+      const ligne = new Array(G.nc).fill(''); ligne[GCOL.grille] = g; ligne[GCOL.statut] = 'vierge';
+      G.nouvelles.push(ligne);
       if (G.nouvelles[G.nouvelles.length - 1].length !== G.nc) throw new Error('Erreur interne : nombre de colonnes des grilles.');
       for (let n = 1; n <= 8; n++) A.nouvelles.push([g + '-' + deux(n), g, n, '', '', 'vierge', '', '']);
     }
@@ -896,7 +1002,9 @@ function lireParams() {
   const taux = Number(String(p.taux == null ? '0.15' : p.taux).replace(',', '.').replace('%', ''));
   if (!/^\d{2}$/.test(edition)) throw new Error("Paramètre « edition » invalide dans l'onglet Parametres.");
   if (!(taux >= 0 && taux < 1)) throw new Error("Paramètre « taux » invalide dans l'onglet Parametres (ex. 0.15).");
-  return { edition: edition, mode: String(p.mode || 'preparation').trim(), taux: taux };
+  const droit = Number(String(p.droit_grille == null || p.droit_grille === '' ? '2' : p.droit_grille).replace(',', '.'));
+  if (!(droit >= 0)) throw new Error("Paramètre « droit_grille » invalide dans l'onglet Parametres (ex. 2).");
+  return { edition: edition, mode: String(p.mode || 'preparation').trim(), taux: taux, droit_grille: droit };
 }
 
 function ecrireParam(cle, valeur) {

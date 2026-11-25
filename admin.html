@@ -21,6 +21,11 @@
   textarea { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 10px; min-height: 70px; }
   .defile { max-height: 420px; overflow: auto; }
   [hidden] { display: none !important; }
+  .cache { display: none !important; }
+  .onglets { display: flex; gap: 6px; flex-wrap: wrap; position: sticky; top: 52px; z-index: 4; background: var(--bg); padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .onglets button { font-weight: 600; font-size: 15px; border: 1px solid var(--line); background: var(--soft); border-radius: 10px; padding: 8px 14px; cursor: pointer; }
+  .onglets button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .onglets button.etape::after { content: ' •'; color: var(--acc); }
 </style>
 </head>
 <body>
@@ -35,17 +40,50 @@
 <main class="page">
   <section class="card">
     <h2>Mode de l'application</h2>
-    <p class="note">Préparation → Listing (samedi) → Vente (dimanche) → Restitution (soir) → Clôture. En Vente, plus aucun prix ne bouge, sauf correction admin tracée.</p>
+    <p class="note">Préparation → Listing (samedi) → Vente (dimanche) → Restitution (soir) → Clôture. Repos = pause (seul l'admin agit). En Vente, plus aucun prix ne bouge, sauf correction admin tracée.</p>
     <div class="rangee" id="modes" style="margin-top:10px"></div>
     <p class="msg" id="msgMode"></p>
   </section>
 
-  <section class="card" id="bacASable" style="border:2px dashed var(--warn)">
+  <!-- Onglets : s'ouvre sur l'étape en cours ; « data-o » = onglets où chaque bloc apparaît -->
+  <nav class="onglets" id="onglets">
+    <button data-onglet="prep">🖨 Préparation</button>
+    <button data-onglet="listing">📝 Listing</button>
+    <button data-onglet="vente">🛒 Vente</button>
+    <button data-onglet="restit">📦 Restitution</button>
+    <button data-onglet="tout">👁 Vue d'ensemble</button>
+    <button data-onglet="journal">📜 Journal</button>
+    <button data-onglet="reglages">⚙ Réglages</button>
+  </nav>
+
+  <section data-o="listing vente restit tout">
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <!-- ===== Préparation ===== -->
+  <section class="card" data-o="prep tout">
+    <h2>Grilles à imprimer (PDF)</h2>
+    <p class="note">Crée les codes dans la base (les grilles déjà existantes sont gardées telles quelles) et télécharge le PDF : A4 paysage, 2 grilles par feuille. Pensez aux grilles de réserve.</p>
+    <div class="rangee" style="margin-top:8px">
+      <input id="genLettres" placeholder="Lettres : A, B, C" style="flex:1;min-width:140px" autocapitalize="characters">
+      <label class="note">de <input id="genDebut" inputmode="numeric" value="1" style="width:64px"></label>
+      <label class="note">à <input id="genFin" inputmode="numeric" value="9" style="width:64px"></label>
+      <label class="note">QR des talons <select id="genQr"><option value="9.5">9,5 mm</option><option value="11">11 mm</option><option value="12">12 mm</option></select></label>
+      <button class="btn d" id="genBtn">Créer et télécharger le PDF</button>
+    </div>
+    <p class="note" id="genApercu"></p>
+    <p class="msg" id="msgGen"></p>
+    <h3 style="margin-top:12px">Grilles déjà imprimées</h3>
+    <p class="note" id="genDeja"></p>
+    <div class="defile" style="max-height:260px"><table><thead><tr><th>Date</th><th class="d">Nombre</th><th>Grilles</th></tr></thead><tbody id="histoImpr"></tbody></table></div>
+  </section>
+
+  <section class="card" id="bacASable" data-o="prep tout" style="border:2px dashed var(--warn)">
     <h2>🧪 Bac à sable (tests)</h2>
     <p class="note">Pour les essais avec le bureau. Fonctionne uniquement en mode <b>Préparation</b> (garde-fou pour la vraie bourse). Les codes PIN, les paramètres et le journal sont toujours gardés.</p>
     <div class="rangee" style="margin-top:10px">
       <button class="btn" id="razBtn">♻ Tout remettre à zéro</button>
-      <span class="note">ventes, prix et descriptions effacés, toutes les grilles redeviennent vierges</span>
+      <span class="note">ventes, prix, descriptions, droits et versements effacés, toutes les grilles redeviennent vierges</span>
     </div>
     <div class="rangee" style="margin-top:10px">
       <label class="note">Grilles remplies au hasard (prêtes à vendre) : lettres <input id="testRemplies" value="A" style="width:90px"></label>
@@ -56,18 +94,23 @@
     <p class="msg" id="msgSable"></p>
   </section>
 
-  <section>
-    <div class="stats" id="stats"></div>
+  <!-- ===== Listing (samedi) ===== -->
+  <section class="card" data-o="listing tout">
+    <h2>Droits de dépôt (2 € par grille)</h2>
+    <p class="note">Encaissés à la sortie avec la page « Dépôt (droits) » sur un téléphone (code listing).</p>
+    <table><thead><tr><th>Espèces</th><th>Chèques</th><th>Carte</th><th>Total</th><th>Grilles payées</th></tr></thead><tbody id="droitsTab"></tbody></table>
+    <p class="note" id="droitsNonPayees" style="margin-top:8px"></p>
   </section>
 
-  <div class="deuxcol">
-    <section class="card">
+  <!-- ===== Vente (dimanche) ===== -->
+  <div class="deuxcol" data-o="vente listing restit tout">
+    <section class="card" data-o="vente tout">
       <h2>Caisses (pour la trésorière)</h2>
       <table><thead><tr><th>Caisse</th><th class="d">Ventes</th><th class="d">Espèces</th><th class="d">Chèques</th><th class="d">Carte</th><th class="d">Total</th></tr></thead><tbody id="caisses"></tbody></table>
       <p class="note">Montants réellement encaissés, ventes annulées exclues.</p>
     </section>
 
-    <section class="card">
+    <section class="card" data-o="listing vente restit tout">
       <h2>Chercher / corriger un article</h2>
       <div class="saisie"><input id="chercheIn" placeholder="A1-03, A1 ou un mot : « puzzle »"><button class="btn" id="chercheBtn">Chercher</button></div>
       <p class="msg" id="msgCherche"></p>
@@ -75,45 +118,41 @@
     </section>
   </div>
 
-  <section class="card">
+  <section class="card" data-o="vente tout">
     <div class="rangee" style="justify-content:space-between"><h2>Dernières ventes</h2><span class="note" id="nbVentes"></span></div>
     <p class="msg" id="msgVentes"></p>
     <div class="defile"><table><thead><tr><th>Heure</th><th>Caisse</th><th>Paiement</th><th>Articles</th><th class="d">Total</th><th>Statut</th><th></th></tr></thead><tbody id="ventes"></tbody></table></div>
   </section>
 
-  <div class="deuxcol">
-    <section class="card">
-      <h2>Saisir une vente papier (plan B)</h2>
-      <p class="note">Si une caisse a dû noter des ventes sur papier : recopier ici chaque vente.</p>
-      <textarea id="papierCodes" placeholder="Codes des articles, séparés par des virgules : A1-03, B2-05"></textarea>
-      <div class="rangee" style="margin-top:8px">
-        <select id="papierPaiement"><option value="especes">Espèces</option><option value="cheque">Chèque</option><option value="carte">Carte</option></select>
-        <input id="papierCaisse" value="papier" style="width:120px" aria-label="Caisse">
-        <input id="papierTotal" inputmode="decimal" placeholder="montant encaissé" style="width:160px">
-        <button class="btn d" id="papierBtn">Enregistrer la vente</button>
-      </div>
-      <p class="msg" id="msgPapier"></p>
-    </section>
+  <section class="card" data-o="vente tout">
+    <h2>Saisir une vente papier (plan B)</h2>
+    <p class="note">Si une caisse a dû noter des ventes sur papier : recopier ici chaque vente.</p>
+    <textarea id="papierCodes" placeholder="Codes des articles, séparés par des virgules : A1-03, B2-05"></textarea>
+    <div class="rangee" style="margin-top:8px">
+      <select id="papierPaiement"><option value="especes">Espèces</option><option value="cheque">Chèque</option><option value="carte">Carte</option></select>
+      <input id="papierCaisse" value="papier" style="width:120px" aria-label="Caisse">
+      <input id="papierTotal" inputmode="decimal" placeholder="montant encaissé" style="width:160px">
+      <button class="btn d" id="papierBtn">Enregistrer la vente</button>
+    </div>
+    <p class="msg" id="msgPapier"></p>
+  </section>
 
-    <section class="card">
-      <h2>Grilles à imprimer (PDF)</h2>
-      <p class="note">Crée les codes dans la base (les grilles déjà existantes sont gardées telles quelles) et télécharge le PDF : A4 paysage, 2 grilles par feuille. Pensez aux grilles de réserve.</p>
-      <div class="rangee" style="margin-top:8px">
-        <input id="genLettres" placeholder="Lettres : A, B, C" style="flex:1;min-width:140px" autocapitalize="characters">
-        <label class="note">de <input id="genDebut" inputmode="numeric" value="1" style="width:64px"></label>
-        <label class="note">à <input id="genFin" inputmode="numeric" value="9" style="width:64px"></label>
-      </div>
-      <div class="rangee" style="margin-top:8px">
-        <label class="note">QR des talons <select id="genQr"><option value="9.5">9,5 mm</option><option value="11">11 mm</option><option value="12">12 mm</option></select></label>
-        <button class="btn d" id="genBtn">Créer et télécharger le PDF</button>
-      </div>
-      <p class="note" id="genApercu"></p>
-      <p class="note" id="genDeja"></p>
-      <p class="msg" id="msgGen"></p>
-    </section>
-  </div>
+  <!-- ===== Restitution (soir) ===== -->
+  <section class="card" data-o="restit tout">
+    <h2>Versements aux vendeurs</h2>
+    <table><thead><tr><th>Versé en espèces</th><th>Versé par chèque</th><th>Total versé</th><th>Grilles restituées</th><th>Reste à verser</th></tr></thead><tbody id="verseTab"></tbody></table>
+    <h3 style="margin-top:12px">Grilles avec des ventes, pas encore restituées</h3>
+    <div class="defile" style="max-height:260px"><table><thead><tr><th>Grille</th><th class="d">À verser</th></tr></thead><tbody id="aRestituer"></tbody></table></div>
+  </section>
 
-  <section class="card">
+  <!-- ===== Journal ===== -->
+  <section class="card" data-o="journal tout">
+    <h2>Journal</h2>
+    <div class="defile"><table><thead><tr><th>Date</th><th>Qui</th><th>Action</th><th>Cible</th><th>Ancien</th><th>Nouveau</th><th>Détail</th></tr></thead><tbody id="journal"></tbody></table></div>
+  </section>
+
+  <!-- ===== Réglages ===== -->
+  <section class="card" data-o="reglages tout">
     <h2>Sauvegarde et liste des prix</h2>
     <p class="note">Au passage en Vente (depuis Listing ou Repos), l'appli fait automatiquement une copie datée du Google Sheet (dossier Drive « Bourse aux jouets – sauvegardes »). Elle peut aussi télécharger sur ce PC la liste des prix, consultable sans internet (plan B : caisse papier) :</p>
     <div class="rangee" style="margin-top:6px">
@@ -128,9 +167,10 @@
     <p class="msg" id="msgSauve"></p>
   </section>
 
-  <section class="card">
-    <h2>Journal</h2>
-    <div class="defile"><table><thead><tr><th>Date</th><th>Qui</th><th>Action</th><th>Cible</th><th>Ancien</th><th>Nouveau</th><th>Détail</th></tr></thead><tbody id="journal"></tbody></table></div>
+  <section class="card" data-o="reglages">
+    <h2>Informations</h2>
+    <p class="note" id="infos"></p>
+    <p class="note">Les paramètres (année de l'édition, taux de 15 %, droit de dépôt par grille) se changent dans l'onglet « Parametres » du Google Sheet.</p>
   </section>
 </main>
 
@@ -174,6 +214,19 @@ $('testBtn').onclick = async () => {
   if (r.ok) { msg('msgSable', 'ok', `${r.grilles_remplies} grille(s) remplie(s) avec ${r.articles} article(s) au hasard. Imprimez les grilles (section « Grilles à imprimer ») et passez en mode Listing ou Vente pour tester.`); toutCharger(); }
 };
 
+// ---------- Onglets : chaque étape montre ce qui sert à ce moment-là ----------
+const ONGLET_DU_MODE = { preparation: 'prep', listing: 'listing', vente: 'vente', restitution: 'restit', cloture: 'restit', repos: 'tout' };
+let onglet = '';
+function montrer(o) {
+  onglet = o;
+  document.querySelectorAll('[data-o]').forEach(e => e.classList.toggle('cache', !e.dataset.o.split(' ').includes(o)));
+  document.querySelectorAll('#onglets [data-onglet]').forEach(b => {
+    b.classList.toggle('on', b.dataset.onglet === o);
+    b.classList.toggle('etape', b.dataset.onglet === ONGLET_DU_MODE[mode]); // point rouge : l'étape en cours
+  });
+}
+$('onglets').onclick = e => { const b = e.target.closest('[data-onglet]'); if (b) montrer(b.dataset.onglet); };
+
 function afficherModes() {
   $('bacASable').style.opacity = mode === 'preparation' ? '1' : '.55';
   $('mode').innerHTML = BJ.badgeMode(mode);
@@ -191,7 +244,7 @@ $('modes').onclick = async e => {
   if (!r.ok) return;
   mode = r.mode;
   msg('msgMode', 'ok', 'Mode « ' + nom + ' » activé. Les téléphones le voient en moins de 15 secondes.');
-  afficherModes(); toutCharger();
+  afficherModes(); montrer(ONGLET_DU_MODE[mode] || 'tout'); toutCharger();
   // Fin du listing : sauvegarde Drive (faite par le serveur) + liste des prix sur ce PC
   if ((ancien === 'listing' || ancien === 'repos') && mode === 'vente') {
     afficherSauvegarde(r);
@@ -210,16 +263,31 @@ async function chargerTableau() {
   mode = r.mode; afficherModes();
   const a = r.articles || {};
   const deposes = (a.depose || 0) + (a.vendu || 0) + (a.restitue || 0) + (a.donne || 0);
+  // Chaque case indique dans quels onglets elle apparaît (data-o)
+  const s = r.stock || {}, dr = r.droits || {}, ve = r.verse || {}, gr = r.grilles || {};
   $('stats').innerHTML = `
-    ${r.stock ? `<div class="stat" title="Tous les articles déposés (samedi), vendus ou non"><span>Stock déposé · ${r.stock.deposes} articles</span><b>${eur2(r.stock.valeur_deposee)}</b></div>
-    <div class="stat" title="Articles encore en vente en ce moment"><span>Encore en vente · ${r.stock.en_vente} articles</span><b>${eur2(r.stock.valeur_en_vente)}</b></div>` : ''}
-    <div class="stat"><span>Articles vendus</span><b>${a.vendu || 0} / ${deposes}</b></div>
-    <div class="stat"><span>Ventes</span><b>${r.ventes}</b></div>
-    <div class="stat"><span>Total vendu</span><b>${eur2(r.total_vendu)}</b></div>
-    <div class="stat fort"><span>Part association ${Math.round(r.taux * 100)} %</span><b>${eur2(r.part_asso)}</b></div>
-    <div class="stat"><span>Part vendeurs</span><b>${eur2(r.part_vendeurs)}</b></div>
-    <div class="stat"><span>À vérifier · annulées</span><b>${r.a_verifier} · ${r.annulees}</b></div>
-    ${r.rembourse ? `<div class="stat"><span>Remboursé (retours)</span><b>${eur2(r.rembourse)}</b></div>` : ''}`;
+    <div class="stat fort" data-o="listing tout" title="Tous les articles déposés, vendus ou non"><span>Stock déposé · ${s.deposes || 0} articles</span><b>${eur2(s.valeur_deposee)}</b></div>
+    <div class="stat" data-o="listing tout"><span>Grilles listées</span><b>${gr.listees || 0} / ${gr.total || 0}</b></div>
+    <div class="stat" data-o="listing tout"><span>Droits de dépôt encaissés · ${dr.payees || 0} grilles</span><b>${eur2(dr.total)}</b></div>
+    <div class="stat" data-o="vente tout" title="Articles encore en vente en ce moment"><span>Encore en vente · ${s.en_vente || 0} articles</span><b>${eur2(s.valeur_en_vente)}</b></div>
+    <div class="stat" data-o="vente tout"><span>Articles vendus</span><b>${a.vendu || 0} / ${deposes}</b></div>
+    <div class="stat" data-o="vente tout"><span>Ventes</span><b>${r.ventes}</b></div>
+    <div class="stat" data-o="vente restit tout"><span>Total vendu</span><b>${eur2(r.total_vendu)}</b></div>
+    <div class="stat fort" data-o="vente restit tout"><span>Part association ${Math.round(r.taux * 100)} %</span><b>${eur2(r.part_asso)}</b></div>
+    <div class="stat" data-o="vente tout"><span>Part vendeurs</span><b>${eur2(r.part_vendeurs)}</b></div>
+    <div class="stat" data-o="vente tout"><span>À vérifier · annulées</span><b>${r.a_verifier} · ${r.annulees}</b></div>
+    ${r.rembourse ? `<div class="stat" data-o="vente tout"><span>Remboursé (retours)</span><b>${eur2(r.rembourse)}</b></div>` : ''}
+    <div class="stat" data-o="restit tout"><span>Déjà versé aux vendeurs</span><b>${eur2(ve.total)}</b></div>
+    <div class="stat" data-o="restit tout"><span>Reste à verser · ${(ve.a_restituer || []).length} grilles</span><b>${eur2(ve.reste_a_verser)}</b></div>`;
+  // Droits de dépôt (onglet Listing)
+  $('droitsTab').innerHTML = `<tr><td>${eur2(dr.especes)}</td><td>${eur2(dr.cheque)}</td><td>${eur2(dr.carte)}</td><td><b>${eur2(dr.total)}</b></td><td>${dr.payees || 0}</td></tr>`;
+  const np = dr.non_payees || [];
+  $('droitsNonPayees').innerHTML = np.length ? `<b style="color:var(--err)">Grilles listées dont le droit n'est pas encore payé (${np.length}) :</b> ${esc(np.join(', '))}` : 'Toutes les grilles listées ont payé leur droit de dépôt.';
+  // Versements aux vendeurs (onglet Restitution)
+  $('verseTab').innerHTML = `<tr><td>${eur2(ve.especes)}</td><td>${eur2(ve.cheque)}</td><td><b>${eur2(ve.total)}</b></td><td>${ve.restituees || 0}</td><td><b>${eur2(ve.reste_a_verser)}</b></td></tr>`;
+  $('aRestituer').innerHTML = (ve.a_restituer || []).map(x => `<tr><td>${esc(x.grille)}</td><td class="d">${eur2(x.du)}</td></tr>`).join('') || '<tr><td colspan="2" class="note">Aucune.</td></tr>';
+  $('infos').textContent = `Édition 20${r.edition} · taux ${Math.round(r.taux * 100)} % · droit de dépôt ${eur2(r.droit_grille)} par grille · serveur v${r.version}`;
+  montrer(onglet || ONGLET_DU_MODE[mode] || 'tout');
   const cs = Object.keys(r.caisses).sort();
   let te = 0, tc = 0, tk = 0, tv = 0;
   $('caisses').innerHTML = cs.map(c => {
@@ -347,7 +415,12 @@ function afficherImpressions(resume) {
   const l = Object.keys(resume || {}).sort().filter(k => resume[k].imprimees);
   $('genDeja').innerHTML = l.length ? 'Déjà imprimées : ' + l.map(k => `<b>${k}</b> : ${resume[k].imprimees} grille(s), prochaine jamais imprimée <b>${k}${resume[k].suivant}</b>`).join(' · ') : 'Aucune grille imprimée pour l\'instant.';
 }
-async function chargerImpressions() { const r = await appel('impression', { verifier: true }); if (r.ok) afficherImpressions(r.resume); }
+async function chargerImpressions() { const r = await appel('impression', { verifier: true }); if (r.ok) { afficherImpressions(r.resume); afficherHistorique(r.historique); } }
+// Mini-historique : une ligne par impression
+function afficherHistorique(h) {
+  $('histoImpr').innerHTML = (h || []).map(x => `<tr><td class="petit">${esc(new Date(x.le).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }))}</td><td class="d">${esc(String(x.nombre).replace(' grille(s)', ''))}</td><td class="petit">${esc(x.grilles)}</td></tr>`).join('')
+    || '<tr><td colspan="3" class="note">Aucune impression enregistrée (seules celles faites depuis la v1.6 sont connues).</td></tr>';
+}
 
 $('genBtn').onclick = async () => {
   const d = grillesDemandees();
@@ -375,7 +448,7 @@ $('genBtn').onclick = async () => {
     }
     const im = await appel('impression', { grilles: d.liste }, 'msgGen');
     if (!im.ok) return;
-    afficherImpressions(im.resume);
+    afficherImpressions(im.resume); afficherHistorique(im.historique);
     msg('msgGen', 'mute', 'Fabrication du PDF…');
     await new Promise(ok => setTimeout(ok, 30));
     const doc = BJ_PDF.grilles(edition, d.liste, { qr: Number($('genQr').value) });
@@ -435,6 +508,7 @@ $('quitter').onclick = () => BJ.deconnexion('jetonAdmin');
 // ---------- Démarrage ----------
 const r = await BJ.connexion({ titre: 'Admin', roles: ['admin'], cle: 'jetonAdmin', session: true, nomCode: 'admin' });
 mode = r.mode; edition = r.edition; afficherModes();
+montrer(ONGLET_DU_MODE[mode] || 'tout'); // l'Admin s'ouvre sur l'étape en cours
 await toutCharger();
 setInterval(() => { if (!document.hidden) { chargerTableau(); chargerVentes(); } }, 30000);
 })();

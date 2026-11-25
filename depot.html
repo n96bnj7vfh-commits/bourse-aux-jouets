@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dépôt (droits) – Bourse aux jouets</title>
+<link rel="stylesheet" href="commun.css">
+<script src="lib/html5-qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="commun.js"></script>
+<style>
+  .total { display: flex; justify-content: space-between; align-items: baseline; background: var(--ink); color: #fff; border-radius: 12px; padding: 12px 16px; margin: 10px 0; }
+  .total .nombre { font-size: 40px; line-height: 1; }
+  .trois { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .trois .btn.big { font-size: 17px; padding: 14px 4px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="entete">
+  <h1>Dépôt · droits</h1>
+  <span id="mode"></span>
+  <button class="lien" id="quitter">Quitter</button>
+</header>
+
+<main class="page">
+  <section class="card">
+    <h2>Grilles du vendeur</h2>
+    <p class="note">Scannez le QR en tête de chacune de ses grilles (ou tapez « A1, A2 »). Droit de dépôt : <b id="droit">2 €</b> par grille.</p>
+    <div id="video" class="video" style="margin-top:8px"></div>
+    <div id="reglages"></div>
+    <p class="msg mute" id="msg" role="status"></p>
+    <div class="saisie">
+      <input id="grillesIn" placeholder="A1, A2" autocomplete="off" autocapitalize="characters">
+      <button class="btn" id="ajouterBtn">Ajouter</button>
+    </div>
+  </section>
+
+  <section class="card" id="panier" hidden>
+    <ul class="lignes" id="liste"></ul>
+    <div class="total"><span id="nbAPayer"></span><span class="nombre" id="montant"></span></div>
+    <div class="trois" id="boutons">
+      <button class="btn p big" data-pay="especes">Espèces</button>
+      <button class="btn d big" data-pay="cheque">Chèque</button>
+      <button class="btn big" data-pay="carte" style="border:2px solid var(--ink)">💳 Carte</button>
+    </div>
+    <p class="note" style="margin-top:6px">Carte : taper le montant dans SumUp, n'appuyer qu'après « Paiement accepté ».</p>
+    <button class="btn" id="viderBtn" style="width:100%;margin-top:8px">Vider (vendeur suivant)</button>
+  </section>
+</main>
+
+<div class="plein" id="ferme" hidden>
+  <div class="card"><h2>Dépôt fermé</h2>
+    <p id="fermeTxt"></p>
+    <button class="btn" id="fermeBtn" style="width:100%;margin-top:10px">Vérifier à nouveau</button>
+  </div>
+</div>
+
+<script>
+(async () => {
+const { $, esc, eur2, son } = BJ;
+let edition = '', mode = '', grilles = [], etat = null;
+const scanner = BJ.creerScanner('video', 'reglages', texte => ajouter([texte], true));
+const msg = (type, t) => { $('msg').className = 'msg ' + type; $('msg').textContent = t; };
+
+async function ajouter(liste, scan) {
+  const nouvelles = [];
+  for (const brut of liste) {
+    const p = BJ.lireCode(brut);
+    if (p.ed && p.ed !== edition) { son('erreur'); return msg('err', `Grille d'une autre édition (20${p.ed}).`); }
+    if (!p.kind) { son('erreur'); return msg('err', `« ${brut} » n'est pas un code de grille.`); }
+    const g = p.kind === 'art' ? p.code.split('-')[0] : p.code;
+    if (grilles.includes(g) || nouvelles.includes(g)) { if (scan) { son('doux'); msg('warn', g + ' est déjà dans la liste.'); } continue; }
+    nouvelles.push(g);
+  }
+  if (!nouvelles.length) return;
+  let r;
+  try { r = await BJ.api('droits_info', { grilles: grilles.concat(nouvelles) }); } catch (e) { son('erreur'); return msg('err', 'Pas de réseau : réessayez.'); }
+  if (!r.ok) { son('erreur'); return msg('err', r.erreur); }
+  grilles = grilles.concat(nouvelles); etat = r;
+  const dejaPayees = r.grilles.filter(x => nouvelles.includes(x.grille) && x.paye);
+  if (dejaPayees.length) { son('doux'); msg('warn', dejaPayees.map(x => x.grille).join(', ') + ' : droit DÉJÀ payé.'); }
+  else { son('ok'); msg('ok', nouvelles.join(', ') + ' ajoutée(s).'); }
+  afficher();
+}
+$('ajouterBtn').onclick = () => { const v = $('grillesIn').value.split(/[,;\s]+/).filter(Boolean); if (v.length) ajouter(v, false); $('grillesIn').value = ''; };
+$('grillesIn').onkeydown = e => { if (e.key === 'Enter') $('ajouterBtn').onclick(); };
+
+function afficher() {
+  $('panier').hidden = !grilles.length;
+  if (!etat) return;
+  $('droit').textContent = eur2(etat.droit_grille);
+  $('liste').innerHTML = etat.grilles.map(x => `<li><span><b>${esc(x.grille)}</b>${x.statut === 'vierge' ? ' <span class="tag t-err">pas encore listée</span>' : ''}</span>
+    <span>${x.paye ? `<span class="tag t-n">déjà payé (${esc(({ especes: 'espèces', cheque: 'chèque', carte: 'carte' })[x.paiement] || x.paiement)})</span>` : `<b>${eur2(etat.droit_grille)}</b>`}</span></li>`).join('');
+  $('nbAPayer').textContent = etat.a_payer + ' grille(s) à payer';
+  $('montant').textContent = eur2(etat.montant);
+  $('boutons').querySelectorAll('button').forEach(b => b.disabled = !etat.a_payer);
+}
+
+document.querySelectorAll('[data-pay]').forEach(b => b.onclick = async () => {
+  if (!etat || !etat.a_payer) return;
+  b.disabled = true;
+  let r;
+  try { r = await BJ.api('droits', { grilles, paiement: b.dataset.pay }); } catch (e) { son('erreur'); b.disabled = false; return msg('err', 'Pas de réseau : réessayez.'); }
+  b.disabled = false;
+  if (!r.ok) { son('erreur'); return msg('err', r.erreur); }
+  son('caisse');
+  msg('ok', `Payé : ${r.payees.join(', ')} – ${eur2(r.total)} (${({ especes: 'espèces', cheque: 'chèque', carte: 'carte' })[b.dataset.pay]}). Vendeur suivant !`);
+  grilles = []; etat = null; afficher();
+});
+$('viderBtn').onclick = () => { grilles = []; etat = null; afficher(); msg('mute', 'Scannez les grilles du vendeur suivant.'); };
+
+// ---------- Mode : ouvert en Listing et en Vente (retardataires) ----------
+async function verifierMode() {
+  let r;
+  try { r = await BJ.api('connexion'); } catch (e) { return; }
+  if (!r.ok) return;
+  mode = r.mode; edition = r.edition;
+  $('mode').innerHTML = BJ.badgeMode(mode);
+  const ouvert = mode === 'listing' || mode === 'vente';
+  if (!ouvert) {
+    $('fermeTxt').textContent = mode === 'repos' ? "Application en pause (mode Repos) : attendez que l'admin la rouvre."
+      : `L'application est en mode « ${(BJ.MODES[mode] || [mode])[0]} » : le paiement des droits se fait en mode Listing (ou Vente pour les retardataires).`;
+    if ($('ferme').hidden) son('erreur');
+    $('ferme').hidden = false; scanner.arreter(); return;
+  }
+  $('ferme').hidden = true;
+  if (!scanner.actif && !document.hidden) scanner.demarrer().catch(e => msg('err', 'Caméra : ' + BJ.expliquerErreurCamera(e) + ' (vous pouvez taper les codes).'));
+}
+setInterval(() => { if (!document.hidden) verifierMode(); }, 15000);
+$('fermeBtn').onclick = () => verifierMode();
+$('quitter').onclick = () => BJ.deconnexion('jetonListing');
+document.addEventListener('visibilitychange', () => { if (document.hidden) scanner.arreter(); else verifierMode(); });
+
+const r = await BJ.connexion({ titre: 'Dépôt (droits)', roles: ['listing'], cle: 'jetonListing', nomCode: 'listing' });
+edition = r.edition;
+msg('mute', 'Scannez les grilles du vendeur.');
+await verifierMode();
+})();
+</script>
+</body>
+</html>

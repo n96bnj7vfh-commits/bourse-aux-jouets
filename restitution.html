@@ -41,6 +41,11 @@
     <div class="card" style="margin-top:12px">
       <div id="detail"></div>
       <div id="actions" style="margin-top:14px">
+        <div class="rangee" id="paiementVendeur" style="margin-bottom:10px">
+          <span style="font-weight:700">Le vendeur est payé :</span>
+          <button class="chip" data-pv="especes">💶 en espèces</button>
+          <button class="chip" data-pv="cheque">✍ par chèque</button>
+        </div>
         <button class="btn p big" id="rendreBtn">Invendus rendus · marquer restituée(s)</button>
         <button class="btn" id="donnerBtn" style="width:100%;margin-top:8px">Le vendeur donne des invendus à une association…</button>
         <div id="choixDons" hidden style="margin-top:8px">
@@ -144,6 +149,7 @@ function afficher() {
   const possible = mode === 'restitution' && aFaire;
   if (!possible || !aRendre) choixDons = false;
   $('rendreBtn').disabled = $('donnerBtn').disabled = !possible;
+  $('paiementVendeur').hidden = !(possible && resteAPayer() > 0);
   $('rendreBtn').hidden = $('donnerBtn').hidden = choixDons;
   if (!aRendre) $('donnerBtn').hidden = true;
   $('choixDons').hidden = !choixDons;
@@ -151,6 +157,15 @@ function afficher() {
   $('actionsNote').textContent = !aFaire ? 'Toutes ces grilles sont déjà restituées.'
     : mode !== 'restitution' ? 'Consultation seulement : les grilles se marquent restituées en mode Restitution.' : '';
 }
+
+// Paiement du vendeur (espèces ou chèque) : à choisir avant de valider, s'il y a une somme à verser
+let paiementVendeur = '';
+$('paiementVendeur').onclick = e => {
+  const b = e.target.closest('[data-pv]'); if (!b) return;
+  paiementVendeur = b.dataset.pv;
+  $('paiementVendeur').querySelectorAll('[data-pv]').forEach(x => x.classList.toggle('on', x === b));
+};
+const resteAPayer = () => bilan ? bilan.grilles.filter(g => g.statut !== 'restituee').reduce((s, g) => s + g.total_vendu, 0) : 0;
 
 // Dons : le vendeur donne en général une partie seulement (jouets anciens, peu chers) : on coche ceux-là
 let choixDons = false;
@@ -162,25 +177,27 @@ $('detail').onchange = e => {
 };
 
 async function restituer(donnes) {
+  if (resteAPayer() > 0 && !paiementVendeur) { son('erreur'); return msg('err', 'Choisissez d\'abord comment le vendeur est payé : espèces ou chèque.'); }
   const question = donnes.length
     ? `Restituer ${grilles.join(', ')} : ${donnes.length} jouet(s) donné(s) à une association, les autres invendus rendus au vendeur. Confirmer ?`
     : 'Marquer ' + grilles.join(', ') + ' restituée(s), invendus rendus au vendeur ?';
   if (!confirm(question)) return;
   $('rendreBtn').disabled = $('donnerBtn').disabled = $('validerDonsBtn').disabled = true;
   let r;
-  try { r = await BJ.api('restituer', { grilles, donnes }); }
+  try { r = await BJ.api('restituer', { grilles, donnes, paiement_vendeur: paiementVendeur }); }
   catch (e) { son('erreur'); msg('err', 'Pas de réseau : réessayez.'); $('validerDonsBtn').disabled = false; return afficher(); }
   $('validerDonsBtn').disabled = false;
   if (!r.ok) { son('erreur'); msg('err', r.erreur); return afficher(); }
   bilan = r; son('ok'); choixDons = false; dons.clear();
-  msg('ok', grilles.join(', ') + ' restituée(s). Somme à verser : ' + eur2(r.a_verser) + '.');
+  msg('ok', grilles.join(', ') + ' restituée(s). Somme versée : ' + eur2(r.a_verser) + (paiementVendeur ? ' (' + (paiementVendeur === 'cheque' ? 'chèque' : 'espèces') + ')' : '') + '.');
   afficher();
 }
 $('rendreBtn').onclick = () => restituer([]);
 $('donnerBtn').onclick = () => { choixDons = true; dons.clear(); afficher(); };
 $('validerDonsBtn').onclick = () => restituer([...dons]);
 $('annulerDonsBtn').onclick = () => { choixDons = false; dons.clear(); afficher(); };
-$('suivantBtn').onclick = () => { grilles = []; bilan = null; choixDons = false; dons.clear(); afficher(); msg('mute', 'Scannez les grilles du vendeur suivant.'); window.scrollTo(0, 0); };
+$('suivantBtn').onclick = () => { grilles = []; bilan = null; choixDons = false; dons.clear();
+  paiementVendeur = ''; $('paiementVendeur').querySelectorAll('[data-pv]').forEach(x => x.classList.remove('on')); afficher(); msg('mute', 'Scannez les grilles du vendeur suivant.'); window.scrollTo(0, 0); };
 
 // ---------- Mode ----------
 async function verifierMode() {

@@ -38,6 +38,14 @@ Relecture du dépôt GitHub `n96bnj7vfh-commits/bourse-aux-jouets` (commit « Fu
 - [x] **Garde-fou de réimpression des grilles** : chaque grille imprimée est datée (colonne `imprimee_le` ajoutée à la fin de l'onglet Grilles). Si on redemande des grilles déjà imprimées, l'Admin prévient et propose les prochaines jamais imprimées (ex. A10 à A18) ; on peut quand même réimprimer (grilles abîmées, non distribuées). L'Admin affiche « Déjà imprimées : A : 18 grille(s), prochaine A19 ».
 - [x] Bac à sable : jusqu'à 99 grilles par lettre (message clair au-delà).
 
+## v1.7 – organisation et argent
+- [x] Admin en **onglets par étape** (Préparation, Listing, Vente, Restitution, Vue d'ensemble, Journal, Réglages), ouvert sur l'étape en cours (point rouge sur l'onglet de l'étape).
+- [x] **Micro-caisse « Dépôt »** (page depot.html, code listing) : scanner les grilles du vendeur, payer les droits (2 € par grille, réglable dans Parametres > droit_grille) en espèces, chèque ou carte ; grille déjà payée signalée. Admin > Listing : droits encaissés par moyen de paiement et grilles listées non payées.
+- [x] **Paiement du vendeur à la restitution** : « en espèces » ou « par chèque » obligatoire s'il y a une somme à verser ; Admin > Restitution : versé en espèces / par chèque, reste à verser, grilles avec ventes pas encore restituées.
+- [x] **Historique des impressions** de grilles (Admin > Préparation).
+- Écran « ventes en direct » : abandonné (pas utile pour l'asso).
+- À voir avec la trésorière : bilan de caisse de fin de journée (fonds de caisse, écarts).
+
 ## Jouet sans talon (talon décollé ou arraché)
 Idée des photos au listing **écartée le 25/11/2026** : trop de photos à parcourir, ralentit le dépôt, la recherche par description fait déjà le tri. Consignes retenues à la place :
 - En caisse : jouet sans talon mis de côté ; l'admin cherche par mot de la description et le vend s'il n'y a pas de doute.

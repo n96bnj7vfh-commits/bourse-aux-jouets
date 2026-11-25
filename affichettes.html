@@ -33,6 +33,7 @@ function rendre() {
   const pages = [];
   for (let i = 1; i <= nb; i++) pages.push(['Caisse ' + i, 'Scanner avec l\'appareil photo du téléphone de caisse', base + 'caisse.html?caisse=' + i]);
   pages.push(['Listing', 'Saisie des prix au dépôt', base + 'listing.html']);
+  pages.push(['Dépôt', 'Paiement des droits (2 € par grille), à la sortie', base + 'depot.html']);
   pages.push(['Restitution', 'Bilan des vendeurs, le soir', base + 'restitution.html']);
   document.getElementById('feuilles').innerHTML = pages.map(p =>
     `<div class="feuille"><h1>${p[0]}</h1><p>${p[1]}</p><div class="qr">${qr(p[2])}</div><div class="lien">${p[2]}</div></div>`).join('');

@@ -253,6 +253,7 @@ async function envoyer() {
       v.codes.forEach(c => { if (article(c)) article(c)[2] = 'vendu'; });
       ecrire('prixCache', cache);
       if (r.anomalies && r.anomalies.length) message('warn', 'Vente à vérifier par l\'admin : ' + r.anomalies.join(' ; '));
+      if (r.mode) changerMode(r.mode);
     }
   } finally {
     envoiEnCours = false;
@@ -281,6 +282,18 @@ async function chargerPrix() {
   return true;
 }
 setInterval(() => { if (BJ.session.pin && !paiementOuvert) chargerPrix(); }, 60000);
+
+// Le mode est vérifié toutes les 15 s (appel léger) : la caisse se ferme vite quand l'admin change de mode.
+function changerMode(m) {
+  if (!cache || m === cache.mode) return;
+  const reouverture = m === 'vente';
+  cache.mode = m; ecrire('prixCache', cache);
+  if (reouverture) chargerPrix(); else verifierMode();
+}
+setInterval(async () => {
+  if (!BJ.session.pin || !$('ecranPin').hidden || document.hidden) return;
+  try { const r = await BJ.api('connexion'); if (r.ok) changerMode(r.mode); } catch (e) { /* hors ligne */ }
+}, 15000);
 
 function verifierMode() {
   const ouverte = cache && cache.mode === 'vente';

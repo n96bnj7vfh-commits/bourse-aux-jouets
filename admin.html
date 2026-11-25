@@ -5,8 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Admin – Bourse aux jouets</title>
 <link rel="stylesheet" href="commun.css">
+<script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"></script>
 <script src="config.js"></script>
 <script src="commun.js"></script>
+<script src="outils-pdf.js"></script>
 <style>
   .page { max-width: 1200px; }
   @media (min-width: 900px) { .deuxcol { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; } }
@@ -77,16 +80,31 @@
     </section>
 
     <section class="card">
-      <h2>Générer des grilles</h2>
-      <p class="note">Crée les codes dans la base (statut « vierge »). Les grilles qui existent déjà sont ignorées.</p>
+      <h2>Grilles à imprimer (PDF)</h2>
+      <p class="note">Crée les codes dans la base (les grilles déjà existantes sont gardées telles quelles) et télécharge le PDF : A4 paysage, 2 grilles par feuille. Pensez aux grilles de réserve.</p>
       <div class="rangee" style="margin-top:8px">
-        <input id="genLettres" placeholder="Lettres : A, B, C" style="flex:1">
-        <input id="genNb" inputmode="numeric" placeholder="nb par lettre" style="width:130px">
-        <button class="btn" id="genBtn">Générer</button>
+        <input id="genLettres" placeholder="Lettres : A, B, C" style="flex:1;min-width:140px" autocapitalize="characters">
+        <label class="note">de <input id="genDebut" inputmode="numeric" value="1" style="width:64px"></label>
+        <label class="note">à <input id="genFin" inputmode="numeric" value="9" style="width:64px"></label>
       </div>
+      <div class="rangee" style="margin-top:8px">
+        <label class="note">QR des talons <select id="genQr"><option value="9.5">9,5 mm</option><option value="11">11 mm</option><option value="12">12 mm</option></select></label>
+        <button class="btn d" id="genBtn">Créer et télécharger le PDF</button>
+      </div>
+      <p class="note" id="genApercu"></p>
       <p class="msg" id="msgGen"></p>
     </section>
   </div>
+
+  <section class="card">
+    <h2>Sauvegarde et liste des prix</h2>
+    <p class="note">Au passage Listing → Vente, l'appli fait automatiquement une copie datée du Google Sheet (dossier Drive « Bourse aux jouets – sauvegardes ») et télécharge sur ce PC la liste des prix en PDF et en tableur, consultable sans internet (plan B : caisse papier).</p>
+    <div class="rangee" style="margin-top:8px">
+      <button class="btn" id="sauverBtn">Sauvegarder maintenant (Drive)</button>
+      <button class="btn" id="listeBtn">Télécharger la liste des prix (PDF + tableur)</button>
+    </div>
+    <p class="msg" id="msgSauve"></p>
+  </section>
 
   <section class="card">
     <h2>Journal</h2>
@@ -97,7 +115,7 @@
 <script>
 (async () => {
 const { $, esc, eur, eur2 } = BJ;
-let mode = '';
+let mode = '', edition = '';
 const ORDRE = ['preparation', 'listing', 'vente', 'restitution', 'cloture'];
 const heure = d => d ? new Date(d).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '';
 const msg = (id, type, t) => { $(id).className = 'msg ' + type; $(id).textContent = t; };
@@ -122,8 +140,20 @@ $('modes').onclick = async e => {
   const b = e.target.closest('[data-m]'); if (!b || b.dataset.m === mode) return;
   const nom = BJ.MODES[b.dataset.m][0];
   if (!confirm('Passer en mode « ' + nom + ' » ?' + (b.dataset.m === 'vente' ? '\n\nLes prix seront verrouillés.' : ''))) return;
+  const ancien = mode;
+  msg('msgMode', 'mute', 'Changement en cours…');
   const r = await appel('mode', { mode: b.dataset.m }, 'msgMode');
-  if (r.ok) { mode = r.mode; msg('msgMode', 'ok', 'Mode « ' + nom + ' » activé. Les téléphones le voient en moins d\'une minute.'); afficherModes(); toutCharger(); }
+  if (!r.ok) return;
+  mode = r.mode;
+  msg('msgMode', 'ok', 'Mode « ' + nom + ' » activé. Les téléphones le voient en moins de 15 secondes.');
+  afficherModes(); toutCharger();
+  // Fin du listing : sauvegarde Drive (faite par le serveur) + liste des prix sur ce PC
+  if (ancien === 'listing' && mode === 'vente') {
+    afficherSauvegarde(r);
+    const n = await telechargerListe('fin de listing');
+    if (n !== false) msg('msgMode', 'ok', `Mode « ${nom} » activé. Liste des prix téléchargée sur ce PC (${n} articles, PDF + tableur).`);
+    $('msgSauve').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 };
 
 // ---------- Tableau de bord ----------
@@ -216,13 +246,71 @@ $('papierBtn').onclick = async () => {
   toutCharger();
 };
 
-// ---------- Génération ----------
+// ---------- Grilles PDF ----------
+function grillesDemandees() {
+  const lettres = $('genLettres').value.toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+  const debut = parseInt($('genDebut').value, 10), fin = parseInt($('genFin').value, 10);
+  if (!lettres.length) return { err: 'Indiquez au moins une lettre.' };
+  if (lettres.some(l => l.length !== 1 || l === 'I' || l === 'O')) return { err: 'Une lettre à la fois, séparées par des virgules ; I et O sont exclues.' };
+  if (!(debut >= 1 && fin >= debut && fin <= 99)) return { err: 'Numéros de grille : de 1 à 99, « de » inférieur ou égal à « à ».' };
+  const liste = [];
+  lettres.forEach(l => { for (let k = debut; k <= fin; k++) liste.push(l + k); });
+  return { lettres, debut, fin, liste };
+}
+['genLettres', 'genDebut', 'genFin'].forEach(id => $(id).oninput = () => {
+  const d = grillesDemandees();
+  $('genApercu').textContent = d.err ? '' : `${d.liste.length} grille(s), ${Math.ceil(d.liste.length / 2)} feuille(s) A4 : ${d.liste[0]} … ${d.liste[d.liste.length - 1]}`;
+});
 $('genBtn').onclick = async () => {
-  const r = await appel('generer', { lettres: $('genLettres').value, nb: Number($('genNb').value) }, 'msgGen');
-  if (!r.ok) return;
-  const c = r.creees.map(g => g.replace(/^\d{2}-/, ''));
-  msg('msgGen', 'ok', c.length ? c.length + ' grille(s) créée(s) : ' + c.join(', ') : 'Aucune nouvelle grille (elles existent déjà).');
-  chargerJournal();
+  const d = grillesDemandees();
+  if (d.err) return msg('msgGen', 'err', d.err);
+  $('genBtn').disabled = true;
+  try {
+    msg('msgGen', 'mute', 'Création des codes…');
+    const r = await appel('generer', { lettres: d.lettres.join(','), nb: d.fin - d.debut + 1, debut: d.debut }, 'msgGen');
+    if (!r.ok) return;
+    msg('msgGen', 'mute', 'Fabrication du PDF…');
+    await new Promise(ok => setTimeout(ok, 30));
+    const doc = BJ_PDF.grilles(edition, d.liste, { qr: Number($('genQr').value) });
+    const nom = `grilles-20${edition}-${d.lettres.join('')}${d.debut}-${d.fin}.pdf`;
+    BJ_PDF.telecharger(doc.output('blob'), nom);
+    msg('msgGen', 'ok', `PDF téléchargé (${nom}) : ${d.liste.length} grille(s)` + (r.creees.length ? `, dont ${r.creees.length} nouvelle(s) dans la base.` : ', toutes déjà dans la base.'));
+    chargerJournal();
+  } finally {
+    $('genBtn').disabled = false;
+  }
+};
+
+// ---------- Sauvegarde et liste des prix ----------
+async function telechargerListe(motif) {
+  const r = await appel('prix', {}, 'msgSauve');
+  if (!r.ok) return false;
+  const date = new Date();
+  const horo = date.toISOString().slice(0, 10) + '-' + String(date.getHours()).padStart(2, '0') + 'h' + String(date.getMinutes()).padStart(2, '0');
+  const titre = `Liste des prix – ${motif} – ${date.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`;
+  BJ_PDF.telecharger(BJ_PDF.listePrix(r.edition, r.articles, titre).output('blob'), `liste-prix-${horo}.pdf`);
+  await new Promise(ok => setTimeout(ok, 600)); // deux téléchargements à la suite
+  BJ_PDF.telecharger(BJ_PDF.csvPrix(r.articles), `liste-prix-${horo}.csv`);
+  return r.articles.length;
+}
+function afficherSauvegarde(r) {
+  if (r.sauvegarde) {
+    $('msgSauve').className = 'msg ok';
+    $('msgSauve').innerHTML = `Copie faite dans Drive : <a href="${BJ.esc(r.sauvegarde.url)}" target="_blank" rel="noopener">${BJ.esc(r.sauvegarde.nom)}</a>`;
+  } else if (r.sauvegarde_erreur) {
+    msg('msgSauve', 'err', 'La copie Drive a échoué : ' + r.sauvegarde_erreur + ' (menu du Google Sheet : Caisse QR > 4. Sauvegarder maintenant).');
+  }
+}
+$('sauverBtn').onclick = async () => {
+  $('sauverBtn').disabled = true;
+  msg('msgSauve', 'mute', 'Copie en cours (quelques secondes)…');
+  const r = await appel('sauvegarde', {}, 'msgSauve');
+  $('sauverBtn').disabled = false;
+  if (r.ok) { afficherSauvegarde(r); chargerJournal(); }
+};
+$('listeBtn').onclick = async () => {
+  const n = await telechargerListe('export manuel');
+  if (n !== false) msg('msgSauve', 'ok', `Liste téléchargée : ${n} article(s) (PDF + tableur, dans le dossier Téléchargements).`);
 };
 
 // ---------- Journal ----------
@@ -239,7 +327,7 @@ $('quitter').onclick = () => BJ.deconnexion('pinAdmin');
 
 // ---------- Démarrage ----------
 const r = await BJ.connexion({ titre: 'Admin', roles: ['admin'], cle: 'pinAdmin', session: true, nomCode: 'admin' });
-mode = r.mode; afficherModes();
+mode = r.mode; edition = r.edition; afficherModes();
 await toutCharger();
 setInterval(() => { if (!document.hidden) { chargerTableau(); chargerVentes(); } }, 30000);
 })();

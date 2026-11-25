@@ -185,7 +185,7 @@ const BJ = (() => {
   // ---------- Modes ----------
   const MODES = {
     preparation: ['Préparation', '#6b7280'], listing: ['Listing (dépôt)', '#3b82f6'], vente: ['Vente', '#1f8a4c'],
-    restitution: ['Restitution', '#b7791f'], cloture: ['Clôture', '#6b7280'],
+    restitution: ['Restitution', '#b7791f'], cloture: ['Clôture', '#6b7280'], repos: ['Repos (pause)', '#9333ea'],
   };
   function badgeMode(mode) {
     const m = MODES[mode] || [mode, '#6b7280'];

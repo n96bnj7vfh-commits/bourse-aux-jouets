@@ -114,7 +114,12 @@
 
   <section class="card">
     <h2>Sauvegarde et liste des prix</h2>
-    <p class="note">Au passage Listing → Vente, l'appli fait automatiquement une copie datée du Google Sheet (dossier Drive « Bourse aux jouets – sauvegardes ») et télécharge sur ce PC la liste des prix en PDF et en tableur, consultable sans internet (plan B : caisse papier).</p>
+    <p class="note">Au passage en Vente (depuis Listing ou Repos), l'appli fait automatiquement une copie datée du Google Sheet (dossier Drive « Bourse aux jouets – sauvegardes »). Elle peut aussi télécharger sur ce PC la liste des prix, consultable sans internet (plan B : caisse papier) :</p>
+    <div class="rangee" style="margin-top:6px">
+      <label><input type="checkbox" id="autoPdf"> télécharger le PDF (à imprimer)</label>
+      <label><input type="checkbox" id="autoCsv"> télécharger le tableur CSV (Excel)</label>
+      <span class="note">réglage gardé sur ce PC</span>
+    </div>
     <div class="rangee" style="margin-top:8px">
       <button class="btn" id="sauverBtn">Sauvegarder maintenant (Drive)</button>
       <button class="btn" id="listeBtn">Télécharger la liste des prix (PDF + tableur)</button>
@@ -132,7 +137,12 @@
 (async () => {
 const { $, esc, eur, eur2 } = BJ;
 let mode = '', edition = '';
-const ORDRE = ['preparation', 'listing', 'vente', 'restitution', 'cloture'];
+const ORDRE = ['preparation', 'listing', 'vente', 'restitution', 'cloture', 'repos'];
+// Téléchargements automatiques au passage en Vente : réglables, gardés sur ce PC (désactivés par défaut)
+['autoPdf', 'autoCsv'].forEach(id => {
+  $(id).checked = localStorage.getItem(id) === '1';
+  $(id).onchange = () => localStorage.setItem(id, $(id).checked ? '1' : '0');
+});
 const heure = d => d ? new Date(d).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '';
 const msg = (id, type, t) => { $(id).className = 'msg ' + type; $(id).textContent = t; };
 async function appel(action, params, idMsg) {
@@ -171,7 +181,9 @@ function afficherModes() {
 $('modes').onclick = async e => {
   const b = e.target.closest('[data-m]'); if (!b || b.dataset.m === mode) return;
   const nom = BJ.MODES[b.dataset.m][0];
-  if (!confirm('Passer en mode « ' + nom + ' » ?' + (b.dataset.m === 'vente' ? '\n\nLes prix seront verrouillés.' : ''))) return;
+  const avert = b.dataset.m === 'vente' ? '\n\nLes prix seront verrouillés.'
+    : b.dataset.m === 'repos' ? '\n\nApplication en pause : plus personne ne peut saisir, vendre ou restituer (sauf l\'admin).' : '';
+  if (!confirm('Passer en mode « ' + nom + ' » ?' + avert)) return;
   const ancien = mode;
   msg('msgMode', 'mute', 'Changement en cours…');
   const r = await appel('mode', { mode: b.dataset.m }, 'msgMode');
@@ -180,10 +192,12 @@ $('modes').onclick = async e => {
   msg('msgMode', 'ok', 'Mode « ' + nom + ' » activé. Les téléphones le voient en moins de 15 secondes.');
   afficherModes(); toutCharger();
   // Fin du listing : sauvegarde Drive (faite par le serveur) + liste des prix sur ce PC
-  if (ancien === 'listing' && mode === 'vente') {
+  if ((ancien === 'listing' || ancien === 'repos') && mode === 'vente') {
     afficherSauvegarde(r);
-    const n = await telechargerListe('fin de listing');
-    if (n !== false) msg('msgMode', 'ok', `Mode « ${nom} » activé. Liste des prix téléchargée sur ce PC (${n} articles, PDF + tableur).`);
+    if ($('autoPdf').checked || $('autoCsv').checked) {
+      const n = await telechargerListe('fin de listing', $('autoPdf').checked, $('autoCsv').checked);
+      if (n !== false) msg('msgMode', 'ok', `Mode « ${nom} » activé. Liste des prix téléchargée sur ce PC (${n} articles).`);
+    }
     $('msgSauve').scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 };
@@ -196,6 +210,8 @@ async function chargerTableau() {
   const a = r.articles || {};
   const deposes = (a.depose || 0) + (a.vendu || 0) + (a.restitue || 0) + (a.donne || 0);
   $('stats').innerHTML = `
+    ${r.stock ? `<div class="stat" title="Tous les articles déposés (samedi), vendus ou non"><span>Stock déposé · ${r.stock.deposes} articles</span><b>${eur2(r.stock.valeur_deposee)}</b></div>
+    <div class="stat" title="Articles encore en vente en ce moment"><span>Encore en vente · ${r.stock.en_vente} articles</span><b>${eur2(r.stock.valeur_en_vente)}</b></div>` : ''}
     <div class="stat"><span>Articles vendus</span><b>${a.vendu || 0} / ${deposes}</b></div>
     <div class="stat"><span>Ventes</span><b>${r.ventes}</b></div>
     <div class="stat"><span>Total vendu</span><b>${eur2(r.total_vendu)}</b></div>
@@ -346,15 +362,15 @@ $('genBtn').onclick = async () => {
 };
 
 // ---------- Sauvegarde et liste des prix ----------
-async function telechargerListe(motif) {
+async function telechargerListe(motif, pdf = true, csv = true) {
   const r = await appel('prix', {}, 'msgSauve');
   if (!r.ok) return false;
   const date = new Date();
   const horo = date.toISOString().slice(0, 10) + '-' + String(date.getHours()).padStart(2, '0') + 'h' + String(date.getMinutes()).padStart(2, '0');
   const titre = `Liste des prix – ${motif} – ${date.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`;
-  BJ_PDF.telecharger(BJ_PDF.listePrix(r.edition, r.articles, titre).output('blob'), `liste-prix-${horo}.pdf`);
-  await new Promise(ok => setTimeout(ok, 600)); // deux téléchargements à la suite
-  BJ_PDF.telecharger(BJ_PDF.csvPrix(r.articles), `liste-prix-${horo}.csv`);
+  if (pdf) BJ_PDF.telecharger(BJ_PDF.listePrix(r.edition, r.articles, titre).output('blob'), `liste-prix-${horo}.pdf`);
+  if (pdf && csv) await new Promise(ok => setTimeout(ok, 600)); // deux téléchargements à la suite
+  if (csv) BJ_PDF.telecharger(BJ_PDF.csvPrix(r.articles), `liste-prix-${horo}.csv`);
   return r.articles.length;
 }
 function afficherSauvegarde(r) {

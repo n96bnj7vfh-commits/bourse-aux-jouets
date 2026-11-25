@@ -25,6 +25,12 @@ Relecture du dépôt GitHub `n96bnj7vfh-commits/bourse-aux-jouets` (commit « Fu
 - [x] Restitution : « Le vendeur donne des invendus… » → on coche les jouets donnés, les autres sont rendus. *(Option peut-être supprimée plus tard : à voir avec le bureau.)*
 - [x] Bac à sable (Admin, mode Préparation uniquement) : « Tout remettre à zéro » (confirmation EFFACER ; PIN, paramètres, codes de grilles et journal gardés) et « Créer les données de test » (ex. A1-A9 remplies au hasard, B1-B9 vierges pour s'entraîner au listing). Aussi dans le menu du Sheet.
 
+## Retours des tests (v1.5)
+- [x] Mode **Repos (pause)** : personne ne peut saisir, vendre ou restituer, sauf l'admin (ex. samedi soir entre le listing et la vente). Les ventes en attente sur un téléphone repartent dès la réouverture. La sauvegarde Drive se fait aussi en passant de Repos à Vente.
+- [x] Admin : cases « Stock déposé » (nombre d'articles et valeur) et « Encore en vente ».
+- [x] Liste des prix PDF / CSV au passage en Vente : **désactivée par défaut**, à cocher dans l'Admin (réglage gardé sur le PC). La copie Drive reste automatique.
+- Grille validée deux fois (deux téléphones, ou hors ligne) : le serveur garde **la dernière arrivée**, chaque changement (ancien → nouveau prix) est noté au journal. Une grille déjà vendue ne peut pas être modifiée sur ses articles vendus. Consigne : une grille = un bénévole.
+
 ## Jouet sans talon (talon décollé ou arraché)
 Idée des photos au listing **écartée le 25/11/2026** : trop de photos à parcourir, ralentit le dépôt, la recherche par description fait déjà le tri. Consignes retenues à la place :
 - En caisse : jouet sans talon mis de côté ; l'admin cherche par mot de la description et le vend s'il n'y a pas de doute.

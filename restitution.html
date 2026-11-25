@@ -182,6 +182,7 @@ async function verifierMode() {
   if (!r.ok) return;
   mode = r.mode; edition = r.edition; taux = r.taux;
   $('mode').innerHTML = BJ.badgeMode(mode);
+  if (mode === 'repos') msg('err', 'Application en pause (mode Repos) : attendez que l\'admin la rouvre.');
   afficher();
   if (!scanner.actif && !document.hidden) scanner.demarrer().catch(e => msg('err', 'Caméra : ' + BJ.expliquerErreurCamera(e) + ' (vous pouvez taper les codes).'));
 }

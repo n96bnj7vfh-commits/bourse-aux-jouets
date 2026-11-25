@@ -314,7 +314,7 @@ function verifierMode() {
   $('ecranFerme').hidden = ouverte || !$('ecranPin').hidden;
   if (!ouverte) {
     $('fermeTxt').textContent = cache && cache.mode === 'restitution'
-      ? 'La vente est terminée (mode Restitution).' : cache && cache.mode === 'cloture' ? 'La bourse est clôturée.'
+      ? 'La vente est terminée (mode Restitution).' : cache && cache.mode === 'cloture' ? 'La bourse est clôturée.' : cache && cache.mode === 'repos' ? 'Application en pause (mode Repos) : attendez que l''admin la rouvre.'
       : "La caisse s'ouvre quand l'admin passe en mode Vente.";
     scanner.arreter();
   } else if ($('ecranDemarrer').hidden && !scanner.actif && !document.hidden) {

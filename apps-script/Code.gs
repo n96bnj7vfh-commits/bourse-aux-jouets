@@ -11,7 +11,7 @@
  */
 
 // Numéro de version : augmenté à CHAQUE modification de ce fichier (règle du projet).
-const VERSION = '1.4';
+const VERSION = '1.5';
 
 // ---------- Structure du classeur ----------
 const ONGLETS = {
@@ -33,7 +33,8 @@ const PARAMS_DEFAUT = [
 // Statuts d'article : vierge (imprimé), depose (prix saisi), vendu, restitue (rendu au vendeur), donne (donné à une asso)
 
 const ROLES = ['listing', 'caisse', 'restitution', 'admin'];
-const MODES = ['preparation', 'listing', 'vente', 'restitution', 'cloture'];
+// « repos » : pause entre deux moments (ex. samedi soir) ; seul l'admin peut agir
+const MODES = ['preparation', 'listing', 'vente', 'restitution', 'cloture', 'repos'];
 const PAIEMENTS = ['especes', 'cheque', 'carte']; // carte : saisie manuelle après « Paiement accepté » sur SumUp
 const DUREE_JETON = 4 * 24 * 3600 * 1000;  // une connexion reste valable 4 jours (samedi → mardi)
 const SEUIL_BLOCAGE = 30;                   // essais de PIN ratés (tous appareils) avant blocage global
@@ -106,7 +107,7 @@ function traiter(req) {
 
   if (!def.ecrit) {
     ctx.params = lireParams();
-    verifierMode(def, ctx.params);
+    verifierMode(def, ctx.params, role, req.action);
     return Object.assign({ ok: true }, def.fn(ctx));
   }
 
@@ -115,7 +116,7 @@ function traiter(req) {
   if (!lock.tryLock(25000)) throw new Error('Serveur occupé, réessayez dans un instant.');
   try {
     ctx.params = lireParams();
-    verifierMode(def, ctx.params);
+    verifierMode(def, ctx.params, role, req.action);
     const res = def.fn(ctx);
     ecrireJournal(ctx);
     SpreadsheetApp.flush();
@@ -125,7 +126,11 @@ function traiter(req) {
   }
 }
 
-function verifierMode(def, params) {
+function verifierMode(def, params, role, action) {
+  // Mode Repos : application en pause, seul l'admin agit (les autres peuvent juste connaître le mode)
+  if (params.mode === 'repos' && role !== 'admin' && action !== 'connexion') {
+    throw new Error('Impossible dans le mode actuel (« repos ») : application en pause, attendez que l\'admin la rouvre.');
+  }
   if (def.modes && def.modes.indexOf(params.mode) < 0) {
     throw new Error('Impossible dans le mode actuel (« ' + params.mode + ' »).');
   }
@@ -385,7 +390,7 @@ function aMode(ctx) {
     ecrireParam('mode', m);
     ctx.journal.push(['mode', '', ancien, m]);
     // Fin du listing : copie datée du classeur dans Drive (sans bloquer le changement de mode si elle échoue)
-    if (m === 'vente' && ancien === 'listing') {
+    if (m === 'vente' && (ancien === 'listing' || ancien === 'repos')) { // repos possible entre listing et vente
       try {
         res.sauvegarde = sauvegarder('fin de listing');
         ctx.journal.push(['sauvegarde', res.sauvegarde.nom, '', '', 'automatique (fin de listing)']);
@@ -420,7 +425,14 @@ function sauvegarder(motif) {
 function aTableau(ctx) {
   const A = charger('Articles'), V = charger('Ventes'), taux = ctx.params.taux;
   const articles = {};
-  A.lignes.forEach(function (r) { articles[r[COL.statut]] = (articles[r[COL.statut]] || 0) + 1; });
+  // Stock : articles déposés (en vente + déjà vendus + rendus/donnés) et ce qui reste en vente, avec leur valeur
+  let nbDeposes = 0, valeurDeposee = 0, nbEnVente = 0, valeurEnVente = 0;
+  A.lignes.forEach(function (r) {
+    const s = r[COL.statut], p = Number(r[COL.prix]) || 0;
+    articles[s] = (articles[s] || 0) + 1;
+    if (s !== 'vierge') { nbDeposes++; valeurDeposee += p; }
+    if (s === 'depose') { nbEnVente++; valeurEnVente += p; }
+  });
   let nb = 0, ca = 0, aVerifier = 0, annulees = 0, rembourse = 0;
   const caisses = {};
   V.lignes.forEach(function (r) {
@@ -441,6 +453,7 @@ function aTableau(ctx) {
   return {
     mode: ctx.params.mode, edition: ctx.params.edition, taux: taux, version: VERSION,
     articles: articles, ventes: nb, a_verifier: aVerifier, annulees: annulees, rembourse: arrondi(rembourse),
+    stock: { deposes: nbDeposes, valeur_deposee: arrondi(valeurDeposee), en_vente: nbEnVente, valeur_en_vente: arrondi(valeurEnVente) },
     total_vendu: arrondi(ca), part_asso: arrondi(ca * taux), part_vendeurs: arrondi(ca - arrondi(ca * taux)),
     caisses: caisses,
   };

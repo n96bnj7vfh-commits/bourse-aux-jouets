@@ -284,6 +284,13 @@ async function chargerPrix() {
   horsLigne = false;
   if (!r.ok) {
     if (/PIN/.test(r.erreur)) demanderPin(r.erreur);
+    else if (/mode actuel/.test(r.erreur)) {
+      // Ex. mode Repos : le serveur refuse les prix → on affiche directement l'écran « caisse fermée »
+      const m = (r.erreur.match(/« (\w+) »/) || [])[1] || '?';
+      if (!cache) cache = { edition: '', mode: m, horodatage: new Date().toISOString(), articles: {} };
+      else cache.mode = m;
+      verifierMode();
+    }
     else message('err', r.erreur);
     return false;
   }
@@ -314,7 +321,7 @@ function verifierMode() {
   $('ecranFerme').hidden = ouverte || !$('ecranPin').hidden;
   if (!ouverte) {
     $('fermeTxt').textContent = cache && cache.mode === 'restitution'
-      ? 'La vente est terminée (mode Restitution).' : cache && cache.mode === 'cloture' ? 'La bourse est clôturée.' : cache && cache.mode === 'repos' ? 'Application en pause (mode Repos) : attendez que l''admin la rouvre.'
+      ? 'La vente est terminée (mode Restitution).' : cache && cache.mode === 'cloture' ? 'La bourse est clôturée.' : cache && cache.mode === 'repos' ? "Application en pause (mode Repos) : attendez que l'admin la rouvre."
       : "La caisse s'ouvre quand l'admin passe en mode Vente.";
     scanner.arreter();
   } else if ($('ecranDemarrer').hidden && !scanner.actif && !document.hidden) {

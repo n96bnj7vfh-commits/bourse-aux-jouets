@@ -55,6 +55,13 @@
   </section>
 </main>
 
+<div class="plein" id="ferme" hidden>
+  <div class="card"><h2>Restitution fermée</h2>
+    <p id="fermeTxt"></p>
+    <button class="btn" id="fermeBtn" style="width:100%;margin-top:10px">Vérifier à nouveau</button>
+  </div>
+</div>
+
 <script>
 (async () => {
 const { $, esc, eur, eur2, son } = BJ;
@@ -182,10 +189,23 @@ async function verifierMode() {
   if (!r.ok) return;
   mode = r.mode; edition = r.edition; taux = r.taux;
   $('mode').innerHTML = BJ.badgeMode(mode);
-  if (mode === 'repos') msg('err', 'Application en pause (mode Repos) : attendez que l\'admin la rouvre.');
   afficher();
+  // Hors du mode Restitution : écran bloqué (comme le listing), vérifié toutes les 15 s
+  const ouvert = mode === 'restitution';
+  if (!ouvert) {
+    $('fermeTxt').textContent = mode === 'repos'
+      ? "Application en pause (mode Repos) : attendez que l'admin la rouvre."
+      : `L'application est en mode « ${(BJ.MODES[mode] || [mode])[0]} » : la restitution s'ouvre quand l'admin passe en mode Restitution.`;
+    if ($('ferme').hidden) son('erreur');
+    $('ferme').hidden = false;
+    scanner.arreter();
+    return;
+  }
+  $('ferme').hidden = true;
   if (!scanner.actif && !document.hidden) scanner.demarrer().catch(e => msg('err', 'Caméra : ' + BJ.expliquerErreurCamera(e) + ' (vous pouvez taper les codes).'));
 }
+setInterval(() => { if (!document.hidden) verifierMode(); }, 15000);
+$('fermeBtn').onclick = () => verifierMode();
 $('quitter').onclick = () => BJ.deconnexion('jetonRestitution');
 document.addEventListener('visibilitychange', () => { if (document.hidden) scanner.arreter(); else verifierMode(); });
 

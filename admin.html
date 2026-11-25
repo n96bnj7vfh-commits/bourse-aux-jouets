@@ -108,6 +108,7 @@
         <button class="btn d" id="genBtn">Créer et télécharger le PDF</button>
       </div>
       <p class="note" id="genApercu"></p>
+      <p class="note" id="genDeja"></p>
       <p class="msg" id="msgGen"></p>
     </section>
   </div>
@@ -341,6 +342,13 @@ function grillesDemandees() {
   const d = grillesDemandees();
   $('genApercu').textContent = d.err ? '' : `${d.liste.length} grille(s), ${Math.ceil(d.liste.length / 2)} feuille(s) A4 : ${d.liste[0]} … ${d.liste[d.liste.length - 1]}`;
 });
+// Ce qui a déjà été imprimé, par lettre (aide à ne pas réimprimer les mêmes grilles)
+function afficherImpressions(resume) {
+  const l = Object.keys(resume || {}).sort().filter(k => resume[k].imprimees);
+  $('genDeja').innerHTML = l.length ? 'Déjà imprimées : ' + l.map(k => `<b>${k}</b> : ${resume[k].imprimees} grille(s), prochaine jamais imprimée <b>${k}${resume[k].suivant}</b>`).join(' · ') : 'Aucune grille imprimée pour l\'instant.';
+}
+async function chargerImpressions() { const r = await appel('impression', { verifier: true }); if (r.ok) afficherImpressions(r.resume); }
+
 $('genBtn').onclick = async () => {
   const d = grillesDemandees();
   if (d.err) return msg('msgGen', 'err', d.err);
@@ -349,6 +357,25 @@ $('genBtn').onclick = async () => {
     msg('msgGen', 'mute', 'Création des codes…');
     const r = await appel('generer', { lettres: d.lettres.join(','), nb: d.fin - d.debut + 1, debut: d.debut }, 'msgGen');
     if (!r.ok) return;
+    // Garde-fou : ces grilles ont-elles déjà été imprimées (et donc peut-être distribuées) ?
+    const v = await appel('impression', { grilles: d.liste, verifier: true }, 'msgGen');
+    if (!v.ok) return;
+    if (v.deja.length) {
+      const jours = [...new Set(v.deja.map(x => new Date(x.le).toLocaleDateString('fr-FR')))].join(', ');
+      const suite = d.lettres.map(l => { const s = (v.resume[l] || {}).suivant || 1; return `${l}${s} à ${l}${s + (d.fin - d.debut)}`; }).join(' et ');
+      const ok = confirm(`⚠ Attention : ${v.deja.length} de ces grilles ont DÉJÀ été imprimées (le ${jours}) :\n` +
+        v.deja.map(x => x.grille).slice(0, 30).join(', ') + (v.deja.length > 30 ? '…' : '') +
+        `\n\nSi elles ont été distribuées, deux vendeurs auraient les mêmes codes.\nProchaines grilles jamais imprimées : ${suite}.\n\n` +
+        `OK = réimprimer quand même (ex. grilles abîmées, non distribuées)\nAnnuler = ne rien imprimer`);
+      if (!ok) {
+        if (d.lettres.length === 1) { const s = (v.resume[d.lettres[0]] || {}).suivant || 1; $('genDebut').value = s; $('genFin').value = s + (d.fin - d.debut); $('genLettres').oninput(); }
+        msg('msgGen', 'warn', `Rien n'a été imprimé. Prochaines grilles jamais imprimées : ${suite}` + (d.lettres.length === 1 ? ' (numéros déjà mis dans les cases).' : '.'));
+        return;
+      }
+    }
+    const im = await appel('impression', { grilles: d.liste }, 'msgGen');
+    if (!im.ok) return;
+    afficherImpressions(im.resume);
     msg('msgGen', 'mute', 'Fabrication du PDF…');
     await new Promise(ok => setTimeout(ok, 30));
     const doc = BJ_PDF.grilles(edition, d.liste, { qr: Number($('genQr').value) });
@@ -401,7 +428,7 @@ async function chargerJournal() {
     || '<tr><td colspan="7" class="note">Vide.</td></tr>';
 }
 
-async function toutCharger() { await Promise.all([chargerTableau(), chargerVentes(), chargerJournal()]); }
+async function toutCharger() { await Promise.all([chargerTableau(), chargerVentes(), chargerJournal(), chargerImpressions()]); }
 $('rafraichir').onclick = toutCharger;
 $('quitter').onclick = () => BJ.deconnexion('jetonAdmin');
 

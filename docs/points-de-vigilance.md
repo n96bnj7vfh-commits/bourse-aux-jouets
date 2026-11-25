@@ -31,6 +31,13 @@ Relecture du dépôt GitHub `n96bnj7vfh-commits/bourse-aux-jouets` (commit « Fu
 - [x] Liste des prix PDF / CSV au passage en Vente : **désactivée par défaut**, à cocher dans l'Admin (réglage gardé sur le PC). La copie Drive reste automatique.
 - Grille validée deux fois (deux téléphones, ou hors ligne) : le serveur garde **la dernière arrivée**, chaque changement (ancien → nouveau prix) est noté au journal. Une grille déjà vendue ne peut pas être modifiée sur ses articles vendus. Consigne : une grille = un bénévole.
 
+## Retours des tests (v1.6)
+- [x] **Caisse en panne en v1.5** (page qui ne démarrait plus : erreur d'apostrophe dans le message du mode Repos). Corrigé. Désormais, la syntaxe de toutes les pages est vérifiée automatiquement avant chaque publication.
+- [x] Caisse en mode Repos : affiche directement « Application en pause » après la connexion.
+- [x] Restitution : fenêtre bloquante hors du mode Restitution (comme le listing), vérifiée toutes les 15 s.
+- [x] **Garde-fou de réimpression des grilles** : chaque grille imprimée est datée (colonne `imprimee_le` ajoutée à la fin de l'onglet Grilles). Si on redemande des grilles déjà imprimées, l'Admin prévient et propose les prochaines jamais imprimées (ex. A10 à A18) ; on peut quand même réimprimer (grilles abîmées, non distribuées). L'Admin affiche « Déjà imprimées : A : 18 grille(s), prochaine A19 ».
+- [x] Bac à sable : jusqu'à 99 grilles par lettre (message clair au-delà).
+
 ## Jouet sans talon (talon décollé ou arraché)
 Idée des photos au listing **écartée le 25/11/2026** : trop de photos à parcourir, ralentit le dépôt, la recherche par description fait déjà le tri. Consignes retenues à la place :
 - En caisse : jouet sans talon mis de côté ; l'admin cherche par mot de la description et le vend s'il n'y a pas de doute.

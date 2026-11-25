@@ -11,18 +11,18 @@
  */
 
 // Numéro de version : augmenté à CHAQUE modification de ce fichier (règle du projet).
-const VERSION = '1.5';
+const VERSION = '1.6';
 
 // ---------- Structure du classeur ----------
 const ONGLETS = {
   Parametres: ['cle', 'valeur', 'note'],
-  Grilles: ['grille', 'statut', 'listee_le', 'restituee_le', 'invendus'],
+  Grilles: ['grille', 'statut', 'listee_le', 'restituee_le', 'invendus', 'imprimee_le'],
   Articles: ['code', 'grille', 'n', 'description', 'prix', 'statut', 'vente_id', 'maj'],
   Ventes: ['vente_id', 'recue_le', 'heure_caisse', 'caisse', 'paiement', 'nb', 'total', 'total_caisse', 'codes', 'statut', 'motif', 'anomalies', 'rembourse', 'retours'],
   Journal: ['date', 'role', 'caisse', 'action', 'cible', 'ancien', 'nouveau', 'detail'],
 };
 const COL = { code: 0, grille: 1, n: 2, description: 3, prix: 4, statut: 5, vente_id: 6, maj: 7 };
-const GCOL = { grille: 0, statut: 1, listee_le: 2, restituee_le: 3, invendus: 4 };
+const GCOL = { grille: 0, statut: 1, listee_le: 2, restituee_le: 3, invendus: 4, imprimee_le: 5 };
 const VCOL = { id: 0, recue_le: 1, heure_caisse: 2, caisse: 3, paiement: 4, nb: 5, total: 6, total_caisse: 7, codes: 8, statut: 9, motif: 10, anomalies: 11, rembourse: 12, retours: 13 };
 // Nouvelles colonnes : toujours AJOUTÉES À LA FIN (le code lit les colonnes par position).
 const PARAMS_DEFAUT = [
@@ -63,6 +63,7 @@ const ACTIONS = {
   ventes:        { roles: [], fn: aVentes },
   sauvegarde:    { roles: [], ecrit: true, fn: aSauvegarde },
   generer:       { roles: [], ecrit: true, fn: aGenerer },
+  impression:    { roles: [], ecrit: true, fn: aImpression },
   // Listing : toutes les grilles et tous les articles d'un coup (ouverture instantanée d'une grille sur le téléphone)
   catalogue:     { roles: ['listing'], fn: aCatalogue },
   // Bac à sable (tests) : seulement en mode Préparation
@@ -653,7 +654,8 @@ function remiseAZero(ctx) {
  */
 function aDonneesTest(ctx) {
   const ed = ctx.params.edition;
-  const nb = Math.min(Math.max(Number(ctx.req.nb) || 9, 1), 30);
+  const nb = Number(ctx.req.nb) || 9;
+  if (!(nb >= 1 && nb <= 99)) throw new Error('Nombre de grilles par lettre : entre 1 et 99.');
   const remplies = String(ctx.req.remplies || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean);
   const vierges = String(ctx.req.vierges || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean);
   if (!remplies.length && !vierges.length) throw new Error('Indiquez au moins une lettre.');
@@ -690,6 +692,46 @@ function aDonneesTest(ctx) {
   return { grilles_remplies: nbGrilles, articles: nbArticles };
 }
 
+/**
+ * Garde-fou d'impression : évite de réimprimer (et donc de distribuer deux fois) les mêmes grilles.
+ *  - verifier : true → dit seulement lesquelles sont déjà imprimées (et quand), sans rien noter ;
+ *  - sinon → note la date d'impression des grilles demandées (après confirmation côté Admin).
+ * Renvoie aussi un résumé par lettre et le prochain numéro jamais imprimé.
+ */
+function aImpression(ctx) {
+  const ed = ctx.params.edition;
+  const vide = !ctx.req.grilles || (Array.isArray(ctx.req.grilles) && !ctx.req.grilles.length);
+  if (vide && !ctx.req.verifier) throw new Error('Indiquez au moins une grille.');
+  const liste = vide ? [] : listeGrilles(ctx.req.grilles, ed);
+  const G = charger('Grilles');
+  const ig = indexer(G, GCOL.grille);
+  const deja = [];
+  liste.forEach(function (g) {
+    const r = G.lignes[ig[g]];
+    if (r && r[GCOL.imprimee_le]) deja.push({ grille: court(g), le: r[GCOL.imprimee_le] });
+  });
+  if (!ctx.req.verifier) {
+    const maintenant = new Date();
+    liste.forEach(function (g) { const r = G.lignes[ig[g]]; if (r) r[GCOL.imprimee_le] = maintenant; });
+    G.modifie = true;
+    sauver(G);
+    ctx.journal.push(['impression', '', '', liste.length + ' grille(s)', liste.map(court).join(', ').slice(0, 300) + (deja.length ? ' (dont ' + deja.length + ' réimprimée(s))' : '')]);
+  }
+  return { deja: deja, resume: resumeImpressions(G) };
+}
+
+// Par lettre : nombre de grilles imprimées et prochain numéro jamais imprimé (ex. { A: { imprimees: 50, suivant: 51 } })
+function resumeImpressions(G) {
+  const res = {};
+  G.lignes.forEach(function (r) {
+    const m = court(r[GCOL.grille]).match(/^([A-Z])(\d+)$/);
+    if (!m) return;
+    const l = res[m[1]] || (res[m[1]] = { imprimees: 0, suivant: 1 });
+    if (r[GCOL.imprimee_le]) { l.imprimees++; l.suivant = Math.max(l.suivant, Number(m[2]) + 1); }
+  });
+  return res;
+}
+
 function aGenerer(ctx) {
   const creees = genererGrilles(ctx.params.edition, ctx.req.lettres, Number(ctx.req.nb), Number(ctx.req.debut) || 1);
   ctx.journal.push(['generation', '', '', creees.length + ' grille(s)', creees.map(court).join(', ').slice(0, 400)]);
@@ -716,7 +758,8 @@ function genererGrilles(ed, lettres, nb, debut) {
       const g = ed + '-' + l + k;
       if (existe[g] != null) continue;
       creees.push(g);
-      G.nouvelles.push([g, 'vierge', '', '', '']);
+      G.nouvelles.push([g, 'vierge', '', '', '', '']);
+      if (G.nouvelles[G.nouvelles.length - 1].length !== G.nc) throw new Error('Erreur interne : nombre de colonnes des grilles.');
       for (let n = 1; n <= 8; n++) A.nouvelles.push([g + '-' + deux(n), g, n, '', '', 'vierge', '', '']);
     }
   });

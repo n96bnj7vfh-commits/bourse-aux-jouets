@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Restitution – Bourse aux jouets</title>
+<link rel="stylesheet" href="commun.css">
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="commun.js"></script>
+<style>
+  @media (min-width: 820px) { .page { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); align-items: start; } .pleine { grid-column: 1 / -1; } }
+  .grille-titre { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 14px 0 4px; }
+  .grille-titre:first-child { margin-top: 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="entete">
+  <h1>Restitution</h1>
+  <span id="mode"></span>
+  <button class="lien" id="quitter">Quitter</button>
+</header>
+
+<main class="page">
+  <section class="card">
+    <h2>Grilles du vendeur</h2>
+    <p class="note">Scannez le QR de chacune de ses grilles papier (ou tapez « A1, A2 »).</p>
+    <div id="video" class="video" style="margin-top:8px"></div>
+    <div id="reglages"></div>
+    <p class="msg mute" id="msg" role="status"></p>
+    <div class="saisie">
+      <input id="grillesIn" placeholder="A1, A2, A3" autocomplete="off" autocapitalize="characters">
+      <button class="btn" id="ajouterBtn">Afficher</button>
+    </div>
+    <div class="rangee" id="choisies" style="margin-top:10px"></div>
+  </section>
+
+  <section id="bilan" hidden>
+    <div class="stats" id="stats"></div>
+    <div class="card" style="margin-top:12px">
+      <div id="detail"></div>
+      <div id="actions" style="margin-top:14px">
+        <button class="btn p big" id="rendreBtn">Invendus rendus · marquer restituée(s)</button>
+        <button class="btn" id="donnerBtn" style="width:100%;margin-top:8px">Le vendeur donne ses invendus à une association</button>
+        <p class="note" id="actionsNote"></p>
+      </div>
+      <button class="btn d" id="suivantBtn" style="width:100%;margin-top:8px">Vendeur suivant</button>
+    </div>
+  </section>
+</main>
+
+<script>
+(async () => {
+const { $, esc, eur, eur2, son } = BJ;
+let edition = '', mode = '', taux = 0.15;
+let grilles = [];   // codes courts : 'A1'
+let bilan = null;
+
+const scanner = BJ.creerScanner('video', 'reglages', texte => ajouter([texte], true));
+const msg = (type, t) => { $('msg').className = 'msg ' + type; $('msg').textContent = t; };
+
+// ---------- Ajout de grilles ----------
+async function ajouter(liste, scan) {
+  const nouvelles = [];
+  for (const brut of liste) {
+    const p = BJ.lireCode(brut);
+    if (p.ed && p.ed !== edition) { son('erreur'); return msg('err', `Grille d'une autre édition (20${p.ed}).`); }
+    if (!p.kind) { son('erreur'); return msg('err', `« ${brut} » n'est pas un code de grille.`); }
+    const g = p.kind === 'art' ? p.code.split('-')[0] : p.code;
+    if (grilles.includes(g) || nouvelles.includes(g)) { if (scan) { son('doux'); msg('warn', g + ' est déjà affichée.'); } continue; }
+    nouvelles.push(g);
+  }
+  if (!nouvelles.length) return;
+  const ok = await charger(grilles.concat(nouvelles));
+  if (ok) { son('ok'); msg('ok', nouvelles.join(', ') + ' ajoutée(s).'); }
+}
+$('ajouterBtn').onclick = () => {
+  const v = $('grillesIn').value.split(/[,;\s]+/).filter(Boolean);
+  if (v.length) ajouter(v, false);
+  $('grillesIn').value = '';
+};
+$('grillesIn').onkeydown = e => { if (e.key === 'Enter') $('ajouterBtn').onclick(); };
+$('choisies').onclick = e => {
+  const b = e.target.closest('[data-g]'); if (!b) return;
+  const reste = grilles.filter(g => g !== b.dataset.g);
+  if (reste.length) charger(reste); else { grilles = []; bilan = null; afficher(); }
+};
+
+async function charger(liste) {
+  msg('mute', 'Chargement…');
+  let r;
+  try { r = await BJ.api('restitution', { grilles: liste }); }
+  catch (e) { son('erreur'); msg('err', 'Pas de réseau : réessayez.'); return false; }
+  if (!r.ok) { son('erreur'); msg('err', r.erreur); return false; }
+  grilles = liste; bilan = r;
+  msg('', '');
+  afficher();
+  return true;
+}
+
+// ---------- Affichage ----------
+const ETIQ = { vendu: ['Vendu', 't-ok'], depose: ['À rendre', 't-warn'], restitue: ['Rendu', 't-n'], donne: ['Donné', 't-n'] };
+function afficher() {
+  $('choisies').innerHTML = grilles.map(g => `<button class="chip on" data-g="${esc(g)}" title="Retirer">${esc(g)} ✕</button>`).join('');
+  $('bilan').hidden = !bilan;
+  if (!bilan) return;
+  const aRendre = bilan.grilles.reduce((s, g) => s + g.invendus.length, 0);
+  const nbVendus = bilan.grilles.reduce((s, g) => s + g.vendus.length, 0);
+  $('stats').innerHTML = `
+    <div class="stat"><span>Total vendu (${nbVendus})</span><b>${eur2(bilan.total_vendu)}</b></div>
+    <div class="stat"><span>Retenue ${Math.round(bilan.taux * 100)} %</span><b>${eur2(bilan.retenue)}</b></div>
+    <div class="stat fort"><span>À verser au vendeur</span><b>${eur2(bilan.a_verser)}</b></div>
+    <div class="stat"><span>Invendus à rendre</span><b>${aRendre}</b></div>`;
+  $('detail').innerHTML = bilan.grilles.map(g => {
+    const court = g.grille.replace(/^\d{2}-/, '');
+    const lignes = g.articles.filter(a => a.statut !== 'vierge');
+    const etat = g.statut === 'restituee' ? '<span class="tag t-n">déjà restituée</span>' : g.statut === 'vierge' ? '<span class="tag t-err">jamais déposée</span>' : '';
+    return `<div class="grille-titre"><h3>${esc(court)} · ${eur2(g.total_vendu)} vendus</h3>${etat}</div>
+      <table><thead><tr><th>Article</th><th>Description</th><th class="d">Prix</th><th>Statut</th></tr></thead><tbody>
+      ${lignes.map(a => { const t = ETIQ[a.statut] || [a.statut, 't-n']; return `<tr><td>${esc(a.code.replace(/^\d{2}-/, ''))}</td><td>${esc(a.description)}</td><td class="d">${eur(a.prix)}</td><td><span class="tag ${t[1]}">${t[0]}</span></td></tr>`; }).join('')
+        || '<tr><td colspan="4" class="note">Aucun article déposé.</td></tr>'}
+      </tbody></table>`;
+  }).join('');
+  const aFaire = bilan.grilles.some(g => g.statut !== 'restituee');
+  const possible = mode === 'restitution' && aFaire;
+  $('rendreBtn').disabled = $('donnerBtn').disabled = !possible;
+  $('donnerBtn').hidden = !aRendre;
+  $('actionsNote').textContent = !aFaire ? 'Toutes ces grilles sont déjà restituées.'
+    : mode !== 'restitution' ? 'Consultation seulement : les grilles se marquent restituées en mode Restitution.' : '';
+}
+
+async function restituer(invendus) {
+  const question = invendus === 'donnes'
+    ? 'Les invendus de ' + grilles.join(', ') + ' sont donnés à une association, et les grilles marquées restituées. Confirmer ?'
+    : 'Marquer ' + grilles.join(', ') + ' restituée(s), invendus rendus au vendeur ?';
+  if (!confirm(question)) return;
+  $('rendreBtn').disabled = $('donnerBtn').disabled = true;
+  let r;
+  try { r = await BJ.api('restituer', { grilles, invendus }); }
+  catch (e) { son('erreur'); msg('err', 'Pas de réseau : réessayez.'); return afficher(); }
+  if (!r.ok) { son('erreur'); msg('err', r.erreur); return afficher(); }
+  bilan = r; son('ok');
+  msg('ok', grilles.join(', ') + ' restituée(s). Somme à verser : ' + eur2(r.a_verser) + '.');
+  afficher();
+}
+$('rendreBtn').onclick = () => restituer('rendus');
+$('donnerBtn').onclick = () => restituer('donnes');
+$('suivantBtn').onclick = () => { grilles = []; bilan = null; afficher(); msg('mute', 'Scannez les grilles du vendeur suivant.'); window.scrollTo(0, 0); };
+
+// ---------- Mode ----------
+async function verifierMode() {
+  let r;
+  try { r = await BJ.api('connexion'); } catch (e) { return; }
+  if (!r.ok) return;
+  mode = r.mode; edition = r.edition; taux = r.taux;
+  $('mode').innerHTML = BJ.badgeMode(mode);
+  afficher();
+  if (!scanner.actif && !document.hidden) scanner.demarrer().catch(e => msg('err', 'Caméra : ' + BJ.expliquerErreurCamera(e) + ' (vous pouvez taper les codes).'));
+}
+$('quitter').onclick = () => BJ.deconnexion('pinRestitution');
+document.addEventListener('visibilitychange', () => { if (document.hidden) scanner.arreter(); else verifierMode(); });
+
+const r = await BJ.connexion({ titre: 'Restitution', roles: ['restitution'], cle: 'pinRestitution' });
+edition = r.edition; mode = r.mode;
+msg('mute', 'Scannez les grilles du vendeur.');
+await verifierMode();
+})();
+</script>
+</body>
+</html>

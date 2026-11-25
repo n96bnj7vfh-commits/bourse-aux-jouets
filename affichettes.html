@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Affichettes QR – Bourse aux jouets</title>
+<script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"></script>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; color: #18213a; background: #eee; }
+  .outils { padding: 14px 18px; background: #18213a; color: #fff; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .outils input { width: 70px; font: inherit; padding: 6px; }
+  .outils button { font: inherit; font-weight: 600; padding: 8px 16px; border: 0; border-radius: 8px; background: #e8492f; color: #fff; cursor: pointer; }
+  .feuille { width: 210mm; height: 297mm; margin: 14px auto; background: #fff; box-sizing: border-box; padding: 20mm; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; page-break-after: always; }
+  .feuille h1 { font-size: 64pt; margin: 0 0 4mm; }
+  .feuille p { font-size: 16pt; margin: 0 0 10mm; color: #5d6478; }
+  .feuille .qr img { width: 120mm; height: 120mm; image-rendering: pixelated; }
+  .feuille .lien { font-size: 10pt; color: #5d6478; margin-top: 8mm; word-break: break-all; }
+  @media print { body { background: #fff; } .outils { display: none; } .feuille { margin: 0; } @page { size: A4; margin: 0; } }
+</style>
+</head>
+<body>
+<div class="outils">
+  <span>Nombre de caisses : <input id="nb" type="number" min="1" max="9" value="3"></span>
+  <button onclick="window.print()">Imprimer</button>
+  <span style="opacity:.8;font-size:14px">Une affichette par page A4, à scotcher sur la table. Le QR ouvre directement la bonne page.</span>
+</div>
+<div id="feuilles"></div>
+<script>
+function qr(url) { const q = qrcode(0, 'M'); q.addData(url); q.make(); return q.createImgTag(8, 16); }
+function rendre() {
+  const nb = Math.min(9, Math.max(1, +document.getElementById('nb').value || 1));
+  const base = new URL('./', location.href).href;
+  const pages = [];
+  for (let i = 1; i <= nb; i++) pages.push(['Caisse ' + i, 'Scanner avec l\'appareil photo du téléphone de caisse', base + 'caisse.html?caisse=' + i]);
+  pages.push(['Listing', 'Saisie des prix au dépôt', base + 'listing.html']);
+  pages.push(['Restitution', 'Bilan des vendeurs, le soir', base + 'restitution.html']);
+  document.getElementById('feuilles').innerHTML = pages.map(p =>
+    `<div class="feuille"><h1>${p[0]}</h1><p>${p[1]}</p><div class="qr">${qr(p[2])}</div><div class="lien">${p[2]}</div></div>`).join('');
+}
+document.getElementById('nb').oninput = rendre;
+rendre();
+</script>
+</body>
+</html>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Listing – Bourse aux jouets</title>
+<link rel="stylesheet" href="commun.css">
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="commun.js"></script>
+<style>
+  .barre { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .barre button { flex: 1 0 22%; padding: 6px 4px; border: 1px solid var(--line); background: var(--soft); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; min-height: 44px; }
+  .barre button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .barre button small { display: block; font-weight: 500; font-size: 12px; opacity: .8; }
+  .affiche { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--soft); margin-top: 10px; }
+  .affiche .nombre { font-size: clamp(40px, 12vw, 60px); line-height: 1; }
+  .rapides { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  .rapides button { white-space: nowrap; padding: 0 2px; font-weight: 700; font-size: 16px; min-height: 52px; border-radius: 12px; border: 2px solid var(--acc); background: transparent; color: var(--acc); cursor: pointer; }
+  .pave { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  .pave button { font-weight: 600; font-size: 26px; min-height: 58px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); cursor: pointer; }
+  .trois { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+  .recap li button { flex: 1; text-align: left; background: none; border: 0; padding: 4px 0; cursor: pointer; font-size: 16px; }
+  .totalg { display: flex; justify-content: space-between; align-items: center; background: var(--ink); color: #fff; border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
+  .totalg .nombre { font-size: 30px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="entete">
+  <h1>Listing (dépôt)</h1>
+  <span id="mode"></span>
+  <button class="lien" id="quitter">Quitter</button>
+</header>
+
+<main class="page">
+  <!-- 1. Scanner la grille -->
+  <section class="card" id="zoneScan">
+    <h2>Scanner la grille</h2>
+    <p class="note">Le QR en tête de grille (à côté du code en gros).</p>
+    <div id="video" class="video" style="margin-top:8px"></div>
+    <div id="reglages"></div>
+    <p class="msg mute" id="msgScan" role="status"></p>
+    <div class="saisie">
+      <input id="grilleIn" placeholder="ou tapez le code : A1" autocomplete="off" autocapitalize="characters">
+      <button class="btn" id="grilleBtn">Ouvrir</button>
+    </div>
+  </section>
+
+  <!-- 2. Saisie / récapitulatif -->
+  <section class="card" id="zoneGrille" hidden></section>
+</main>
+
+<div class="plein" id="ferme" hidden>
+  <div class="card"><h2>Listing fermé</h2>
+    <p id="fermeTxt"></p>
+    <button class="btn" id="fermeBtn" style="width:100%;margin-top:10px">Vérifier à nouveau</button>
+  </div>
+</div>
+
+<script>
+(async () => {
+const { $, esc, eur, eur2, son, deux } = BJ;
+let edition = '', mode = '';
+let L = null; // grille ouverte : { g, court, idx, buf, pre, prix[8], desc[8], statuts[8], recap, edit }
+
+const scanner = BJ.creerScanner('video', 'reglages', texte => ouvrir(texte));
+const msgScan = (type, t) => { $('msgScan').className = 'msg ' + type; $('msgScan').textContent = t; };
+
+// ---------- Ouverture d'une grille ----------
+async function ouvrir(brut) {
+  if (L) return;
+  const p = BJ.lireCode(brut);
+  if (p.ed && p.ed !== edition) { son('erreur'); return msgScan('err', `Grille d'une autre édition (20${p.ed}) : donner une grille de réserve.`); }
+  if (!p.kind) { son('erreur'); return msgScan('err', `« ${brut} » n'est pas un code de grille.`); }
+  const court = p.kind === 'art' ? p.code.split('-')[0] : p.code; // un talon scanné ouvre sa grille
+  msgScan('mute', 'Ouverture de ' + court + '…');
+  let r;
+  try { r = await BJ.api('grille', { grille: court }); }
+  catch (e) { son('erreur'); return msgScan('err', 'Pas de réseau : réessayez.'); }
+  if (!r.ok) { son('erreur'); return msgScan('err', r.erreur); }
+  if (r.statut === 'restituee') { son('erreur'); return msgScan('err', court + ' est déjà restituée.'); }
+  son('ok');
+  await scanner.arreter();
+  L = { g: r.grille, court, idx: 0, buf: '', pre: false, recap: r.statut !== 'vierge', edit: false,
+    prix: r.articles.map(a => a.prix), desc: r.articles.map(a => a.description || ''), statuts: r.articles.map(a => a.statut) };
+  L.message = r.statut === 'vierge' ? ['ok', `Grille ${court} ouverte.`] : ['warn', `${court} déjà déposée : vous pouvez la modifier.`];
+  if (!L.recap) allerA(0);
+  afficher();
+}
+$('grilleBtn').onclick = () => { const v = $('grilleIn').value.trim(); if (v) ouvrir(v); $('grilleIn').value = ''; };
+$('grilleIn').onkeydown = e => { if (e.key === 'Enter') $('grilleBtn').onclick(); };
+
+// ---------- Pavé numérique ----------
+const fmt = v => v == null ? '' : (Number.isInteger(v) ? String(v) : v.toFixed(2).replace('.', ','));
+function allerA(i) { L.idx = i; L.buf = fmt(L.prix[i]); L.pre = L.buf !== ''; }
+function suivant() { if (L.idx >= 7) { L.recap = true; L.buf = ''; } else allerA(L.idx + 1); }
+function apres() { if (L.edit) { L.edit = false; L.recap = true; L.buf = ''; } else suivant(); }
+function lirePrix(buf) {
+  const n = parseFloat(String(buf || '').replace(',', '.'));
+  if (!(n > 0)) return { err: 'Tapez un prix, ou « Passer » si l\'article est absent.' };
+  if (Math.round(n * 2) !== n * 2) return { err: 'Prix acceptés : euros ronds ou 0,50 (ex. 0,50 · 1 · 2,50).' };
+  return { v: n };
+}
+const vendu = i => L.statuts[i] !== 'vierge' && L.statuts[i] !== 'depose';
+
+function action(a, v) {
+  if (!L) return;
+  if (L.message && a !== 'desc') L.message = null;
+  switch (a) {
+    case 'rapide': L.buf = fmt(+v); L.pre = true; break;
+    case 'touche':
+      if (L.pre) { L.pre = false; if (v !== '⌫') L.buf = ''; }
+      if (v === '⌫') L.buf = L.buf.slice(0, -1);
+      else if (v === ',') { if (!L.buf.includes(',')) L.buf = (L.buf || '0') + ','; }
+      else if (L.buf.replace(',', '').length < 5 && !(L.buf.includes(',') && L.buf.split(',')[1].length >= 2)) L.buf += v;
+      break;
+    case 'valider': {
+      const p = lirePrix(L.buf);
+      if (p.err) { son('erreur'); L.message = ['err', p.err]; break; }
+      L.prix[L.idx] = p.v; apres(); break;
+    }
+    case 'passer': L.prix[L.idx] = null; apres(); break;
+    case 'precedent': if (L.idx > 0) allerA(L.idx - 1); L.edit = false; break;
+    case 'aller': allerA(+v); L.edit = false; break;
+    case 'fin': { const p = lirePrix(L.buf); if (L.buf && !p.err) L.prix[L.idx] = p.v; L.buf = ''; L.edit = false; L.recap = true; break; }
+    case 'corriger': if (vendu(+v)) { L.message = ['err', 'Article déjà vendu : non modifiable.']; break; } L.recap = false; allerA(+v); L.edit = true; break;
+    case 'abandonner': L = null; msgScan('mute', 'Saisie abandonnée, rien n\'a été enregistré.'); scanner.demarrer().catch(() => {}); break;
+    case 'enregistrer': enregistrer(); return;
+  }
+  afficher();
+}
+
+async function enregistrer() {
+  const n = L.prix.filter(v => v != null).length;
+  if (!n) { L.message = ['err', 'Aucun prix saisi : saisissez au moins un prix, ou « Abandonner ».']; son('erreur'); return afficher(); }
+  const bouton = $('zoneGrille').querySelector('[data-a=enregistrer]');
+  bouton.disabled = true; bouton.textContent = 'Enregistrement…';
+  const articles = L.prix.map((p, i) => ({ n: i + 1, prix: p == null ? '' : p, description: L.desc[i] }))
+    .filter((a, i) => !vendu(i));
+  let r;
+  try { r = await BJ.api('listing', { grille: L.court, articles }); }
+  catch (e) { L.message = ['err', 'Pas de réseau : rien n\'est perdu, réessayez « Valider la grille ».']; son('erreur'); return afficher(); }
+  if (!r.ok) { L.message = ['err', r.erreur]; son('erreur'); return afficher(); }
+  const total = L.prix.reduce((s, v) => s + (v || 0), 0);
+  son('ok');
+  msgScan('ok', `${L.court} enregistrée : ${n} article(s), ${eur2(total)}. Grille suivante !`);
+  L = null;
+  afficher();
+  scanner.demarrer().catch(e => msgScan('err', 'Caméra : ' + BJ.expliquerErreurCamera(e)));
+}
+
+// ---------- Affichage ----------
+function afficher() {
+  $('zoneScan').hidden = !!L;
+  $('zoneGrille').hidden = !L;
+  if (!L) return;
+  const m = L.message ? `<p class="msg ${L.message[0]}" role="status">${esc(L.message[1])}</p>` : '<p class="msg"></p>';
+  if (L.recap) {
+    const total = L.prix.reduce((s, v) => s + (v || 0), 0);
+    $('zoneGrille').innerHTML = `<h2>Grille ${esc(L.court)} · récapitulatif</h2>${m}
+      <p class="note">Touchez une ligne pour la corriger.</p>
+      <ul class="lignes recap">${L.prix.map((v, i) => `<li><button data-a="corriger" data-v="${i}">${esc(L.court)}-${deux(i + 1)}${L.desc[i] ? ' · ' + esc(L.desc[i]) : ''}</button>
+        <span class="nombre">${vendu(i) ? '<span class="tag t-ok">vendu</span> ' : ''}${v == null ? '<span class="tag t-n">non déposé</span>' : eur(v)}</span></li>`).join('')}</ul>
+      <div class="totalg"><span>${L.prix.filter(v => v != null).length} article(s)</span><span class="nombre">${eur2(total)}</span></div>
+      <button class="btn p big" data-a="enregistrer">Valider la grille</button>
+      <button class="btn" data-a="abandonner" style="width:100%;margin-top:8px">Abandonner</button>`;
+    return;
+  }
+  $('zoneGrille').innerHTML = `<div class="rangee" style="justify-content:space-between"><h2>${esc(L.court)} · Article ${L.idx + 1} / 8</h2><span class="note">${esc(L.court)}-${deux(L.idx + 1)}</span></div>
+    <div class="barre">${L.prix.map((v, i) => `<button class="${i === L.idx ? 'on' : ''}" data-a="aller" data-v="${i}">${i + 1}<small>${v == null ? '—' : eur(v)}</small></button>`).join('')}</div>
+    <div class="affiche"><span class="note">Prix</span><span class="nombre">${L.buf ? esc(L.buf) + ' €' : '<span style="opacity:.3">0 €</span>'}</span></div>
+    <input id="descIn" value="${esc(L.desc[L.idx])}" placeholder="Description (facultatif) : puzzle Cars…" autocomplete="off" maxlength="200" style="width:100%;margin-top:10px">
+    <div class="rapides">${[0.5, 1, 2, 3, 5].map(v => `<button data-a="rapide" data-v="${v}">${eur(v)}</button>`).join('')}</div>
+    <div class="pave">${['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', '⌫'].map(k => `<button data-a="touche" data-v="${k}" aria-label="${k === '⌫' ? 'effacer' : k}">${k}</button>`).join('')}</div>
+    ${m}
+    <button class="btn p big" data-a="valider">Valider ce prix</button>
+    <div class="trois"><button class="btn" data-a="precedent" ${L.idx === 0 ? 'disabled' : ''}>← Précédent</button><button class="btn" data-a="passer">Passer</button><button class="btn d" data-a="fin">Fin de grille</button></div>
+    <p class="note" style="margin-top:8px">Les boutons rouges remplissent le prix, « Valider » le confirme. « Fin de grille » garde les prix déjà saisis.</p>`;
+  $('descIn').oninput = e => { L.desc[L.idx] = e.target.value; };
+}
+$('zoneGrille').onclick = e => { const b = e.target.closest('[data-a]'); if (b && !b.disabled) action(b.dataset.a, b.dataset.v); };
+
+// ---------- Mode ----------
+async function verifierMode() {
+  let r;
+  try { r = await BJ.api('connexion'); } catch (e) { return; }
+  if (!r.ok) return;
+  mode = r.mode; edition = r.edition;
+  $('mode').innerHTML = BJ.badgeMode(mode);
+  const ouvert = mode === 'listing';
+  $('ferme').hidden = ouvert;
+  $('fermeTxt').textContent = `L'application est en mode « ${(BJ.MODES[mode] || [mode])[0]} » : les prix ne se saisissent qu'en mode Listing (choisi par l'admin).`;
+  if (!ouvert) scanner.arreter();
+  else if (!L && !scanner.actif && !document.hidden) scanner.demarrer().catch(e => msgScan('err', 'Caméra : ' + BJ.expliquerErreurCamera(e) + ' (vous pouvez taper le code).'));
+}
+$('fermeBtn').onclick = verifierMode;
+$('quitter').onclick = () => BJ.deconnexion('pinListing');
+document.addEventListener('visibilitychange', () => { if (document.hidden) scanner.arreter(); else verifierMode(); });
+
+// ---------- Démarrage ----------
+const r = await BJ.connexion({ titre: 'Listing (dépôt)', roles: ['listing'], cle: 'pinListing' });
+edition = r.edition;
+msgScan('mute', 'Présentez le QR de la grille.');
+await verifierMode();
+})();
+</script>
+</body>
+</html>

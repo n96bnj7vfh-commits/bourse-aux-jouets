@@ -33,6 +33,34 @@ input:focus-visible, button:focus-visible, select:focus-visible { outline: 3px s
 .puces button { flex: 1; padding: 7px 4px; border: 1px solid var(--line); background: var(--soft); border-radius: 99px; font-size: 14px; font-weight: 600; cursor: pointer; min-height: 38px; }
 .puces button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
 
+/* En-tête des écrans */
+.entete { position: sticky; top: 0; z-index: 5; background: var(--ink); color: #fff; padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.entete h1 { font-size: 19px; flex: 1; }
+.entete a, .entete button.lien { color: #fff; opacity: .8; font-size: 14px; background: none; border: 0; cursor: pointer; text-decoration: underline; }
+.page { max-width: 1000px; margin: 0 auto; padding: 12px 14px 60px; display: grid; gap: 12px; }
+.saisie { display: flex; gap: 8px; margin-top: 6px; }
+.saisie input { flex: 1; }
+.lignes { list-style: none; margin: 8px 0 0; padding: 0; }
+.lignes li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.lignes li:last-child { border-bottom: 0; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.stat { background: var(--soft); border-radius: 12px; padding: 12px; }
+.stat b { display: block; font-size: 26px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 13px; color: var(--mute); }
+.stat.fort { background: var(--ink); color: #fff; } .stat.fort span { color: #fff; opacity: .8; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 13px; color: var(--mute); font-weight: 600; }
+td.d, th.d { text-align: right; white-space: nowrap; }
+.tag { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 99px; white-space: nowrap; }
+.t-ok { background: rgba(31,138,76,.15); color: var(--ok); }
+.t-warn { background: rgba(183,121,31,.18); color: var(--warn); }
+.t-err { background: rgba(198,40,40,.12); color: var(--err); }
+.t-n { background: var(--soft); color: var(--mute); }
+.chip { font-weight: 600; font-size: 14px; border: 1px solid var(--line); background: var(--soft); border-radius: 99px; padding: 8px 13px; min-height: 40px; cursor: pointer; }
+.chip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.rangee { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
 /* Écran plein (connexion, paiement, caisse fermée) */
 .plein { position: fixed; inset: 0; background: rgba(251,250,247,.97); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 10; }
 .plein .card { width: min(460px, 100%); text-align: center; }

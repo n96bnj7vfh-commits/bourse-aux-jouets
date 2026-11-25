@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin – Bourse aux jouets</title>
+<link rel="stylesheet" href="commun.css">
+<script src="config.js"></script>
+<script src="commun.js"></script>
+<style>
+  .page { max-width: 1200px; }
+  @media (min-width: 900px) { .deuxcol { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; } }
+  .deuxcol > * + * { margin-top: 12px; }
+  @media (min-width: 900px) { .deuxcol > * + * { margin-top: 0; } }
+  h2 { margin-bottom: 8px; }
+  .petit { font-size: 13px; }
+  .mini { padding: 4px 10px; min-height: 34px; font-size: 13px; border-radius: 8px; }
+  textarea { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 10px; min-height: 70px; }
+  .defile { max-height: 420px; overflow: auto; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="entete">
+  <h1>Admin · Bourse aux jouets</h1>
+  <span id="mode"></span>
+  <span class="note" style="color:#fff;opacity:.7" id="maj"></span>
+  <button class="lien" id="rafraichir">↻ Actualiser</button>
+  <button class="lien" id="quitter">Quitter</button>
+</header>
+
+<main class="page">
+  <section class="card">
+    <h2>Mode de l'application</h2>
+    <p class="note">Préparation → Listing (samedi) → Vente (dimanche) → Restitution (soir) → Clôture. En Vente, plus aucun prix ne bouge, sauf correction admin tracée.</p>
+    <div class="rangee" id="modes" style="margin-top:10px"></div>
+    <p class="msg" id="msgMode"></p>
+  </section>
+
+  <section>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <div class="deuxcol">
+    <section class="card">
+      <h2>Caisses (pour la trésorière)</h2>
+      <table><thead><tr><th>Caisse</th><th class="d">Ventes</th><th class="d">Espèces</th><th class="d">Chèques</th><th class="d">Total</th></tr></thead><tbody id="caisses"></tbody></table>
+      <p class="note">Montants réellement encaissés, ventes annulées exclues.</p>
+    </section>
+
+    <section class="card">
+      <h2>Chercher / corriger un article</h2>
+      <div class="saisie"><input id="chercheIn" placeholder="A1-03, A1 ou un mot : « puzzle »"><button class="btn" id="chercheBtn">Chercher</button></div>
+      <p class="msg" id="msgCherche"></p>
+      <div class="defile"><table id="resultats"></table></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="rangee" style="justify-content:space-between"><h2>Dernières ventes</h2><span class="note" id="nbVentes"></span></div>
+    <p class="msg" id="msgVentes"></p>
+    <div class="defile"><table><thead><tr><th>Heure</th><th>Caisse</th><th>Paiement</th><th>Articles</th><th class="d">Total</th><th>Statut</th><th></th></tr></thead><tbody id="ventes"></tbody></table></div>
+  </section>
+
+  <div class="deuxcol">
+    <section class="card">
+      <h2>Saisir une vente papier (plan B)</h2>
+      <p class="note">Si une caisse a dû noter des ventes sur papier : recopier ici chaque vente.</p>
+      <textarea id="papierCodes" placeholder="Codes des articles, séparés par des virgules : A1-03, B2-05"></textarea>
+      <div class="rangee" style="margin-top:8px">
+        <select id="papierPaiement"><option value="especes">Espèces</option><option value="cheque">Chèque</option></select>
+        <input id="papierCaisse" value="papier" style="width:120px" aria-label="Caisse">
+        <input id="papierTotal" inputmode="decimal" placeholder="montant encaissé" style="width:160px">
+        <button class="btn d" id="papierBtn">Enregistrer la vente</button>
+      </div>
+      <p class="msg" id="msgPapier"></p>
+    </section>
+
+    <section class="card">
+      <h2>Générer des grilles</h2>
+      <p class="note">Crée les codes dans la base (statut « vierge »). Les grilles qui existent déjà sont ignorées.</p>
+      <div class="rangee" style="margin-top:8px">
+        <input id="genLettres" placeholder="Lettres : A, B, C" style="flex:1">
+        <input id="genNb" inputmode="numeric" placeholder="nb par lettre" style="width:130px">
+        <button class="btn" id="genBtn">Générer</button>
+      </div>
+      <p class="msg" id="msgGen"></p>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Journal</h2>
+    <div class="defile"><table><thead><tr><th>Date</th><th>Qui</th><th>Action</th><th>Cible</th><th>Ancien</th><th>Nouveau</th><th>Détail</th></tr></thead><tbody id="journal"></tbody></table></div>
+  </section>
+</main>
+
+<script>
+(async () => {
+const { $, esc, eur, eur2 } = BJ;
+let mode = '';
+const ORDRE = ['preparation', 'listing', 'vente', 'restitution', 'cloture'];
+const heure = d => d ? new Date(d).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+const msg = (id, type, t) => { $(id).className = 'msg ' + type; $(id).textContent = t; };
+async function appel(action, params, idMsg) {
+  try {
+    const r = await BJ.api(action, params);
+    if (!r.ok && idMsg) msg(idMsg, 'err', r.erreur);
+    if (!r.ok && /PIN/.test(r.erreur || '')) BJ.deconnexion('pinAdmin');
+    return r;
+  } catch (e) {
+    if (idMsg) msg(idMsg, 'err', 'Pas de réseau : réessayez.');
+    return { ok: false };
+  }
+}
+
+// ---------- Mode ----------
+function afficherModes() {
+  $('mode').innerHTML = BJ.badgeMode(mode);
+  $('modes').innerHTML = ORDRE.map(m => `<button class="chip ${m === mode ? 'on' : ''}" data-m="${m}">${esc(BJ.MODES[m][0])}</button>`).join('');
+}
+$('modes').onclick = async e => {
+  const b = e.target.closest('[data-m]'); if (!b || b.dataset.m === mode) return;
+  const nom = BJ.MODES[b.dataset.m][0];
+  if (!confirm('Passer en mode « ' + nom + ' » ?' + (b.dataset.m === 'vente' ? '\n\nLes prix seront verrouillés.' : ''))) return;
+  const r = await appel('mode', { mode: b.dataset.m }, 'msgMode');
+  if (r.ok) { mode = r.mode; msg('msgMode', 'ok', 'Mode « ' + nom + ' » activé. Les téléphones le voient en moins d\'une minute.'); afficherModes(); toutCharger(); }
+};
+
+// ---------- Tableau de bord ----------
+async function chargerTableau() {
+  const r = await appel('tableau');
+  if (!r.ok) return;
+  mode = r.mode; afficherModes();
+  const a = r.articles || {};
+  const deposes = (a.depose || 0) + (a.vendu || 0) + (a.restitue || 0) + (a.donne || 0);
+  $('stats').innerHTML = `
+    <div class="stat"><span>Articles vendus</span><b>${a.vendu || 0} / ${deposes}</b></div>
+    <div class="stat"><span>Ventes</span><b>${r.ventes}</b></div>
+    <div class="stat"><span>Total vendu</span><b>${eur2(r.total_vendu)}</b></div>
+    <div class="stat fort"><span>Part association ${Math.round(r.taux * 100)} %</span><b>${eur2(r.part_asso)}</b></div>
+    <div class="stat"><span>Part vendeurs</span><b>${eur2(r.part_vendeurs)}</b></div>
+    <div class="stat"><span>À vérifier · annulées</span><b>${r.a_verifier} · ${r.annulees}</b></div>`;
+  const cs = Object.keys(r.caisses).sort();
+  let te = 0, tc = 0, tv = 0;
+  $('caisses').innerHTML = cs.map(c => {
+    const k = r.caisses[c], e = k.especes || 0, ch = k.cheque || 0;
+    te += e; tc += ch; tv += k.ventes;
+    return `<tr><td>Caisse ${esc(c)}</td><td class="d">${k.ventes}</td><td class="d">${eur2(e)}</td><td class="d">${eur2(ch)}</td><td class="d"><b>${eur2(e + ch)}</b></td></tr>`;
+  }).join('') + (cs.length ? `<tr><td><b>Total</b></td><td class="d">${tv}</td><td class="d"><b>${eur2(te)}</b></td><td class="d"><b>${eur2(tc)}</b></td><td class="d"><b>${eur2(te + tc)}</b></td></tr>`
+    : '<tr><td colspan="5" class="note">Aucune vente.</td></tr>');
+  $('maj').textContent = 'à jour ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+// ---------- Ventes ----------
+async function chargerVentes() {
+  const r = await appel('ventes', { n: 50 });
+  if (!r.ok) return;
+  $('nbVentes').textContent = r.total + ' vente(s) au total';
+  $('ventes').innerHTML = r.ventes.map(v => {
+    const st = v.statut === 'annulee' ? `<span class="tag t-n" title="${esc(v.motif)}">annulée</span>`
+      : v.statut === 'a_verifier' ? `<span class="tag t-err" title="${esc(v.anomalies)}">à vérifier</span>` : '<span class="tag t-ok">ok</span>';
+    return `<tr><td class="petit">${esc(heure(v.heure_caisse || v.recue_le))}</td><td>${esc(v.caisse)}</td><td>${v.paiement === 'cheque' ? 'Chèque' : 'Espèces'}</td>
+      <td class="petit">${esc(v.codes)}${v.anomalies ? `<br><span style="color:var(--err)">${esc(v.anomalies)}</span>` : ''}</td>
+      <td class="d"><b>${eur2(v.total)}</b>${v.total_caisse !== '' && Number(v.total_caisse) !== Number(v.total) ? `<br><span class="petit">encaissé ${eur2(v.total_caisse)}</span>` : ''}</td>
+      <td>${st}</td><td>${v.statut !== 'annulee' ? `<button class="btn mini" data-annuler="${esc(v.id)}">Annuler</button>` : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="7" class="note">Aucune vente.</td></tr>';
+}
+$('ventes').onclick = async e => {
+  const b = e.target.closest('[data-annuler]'); if (!b) return;
+  const motif = prompt('Annuler cette vente : les articles seront remis en vente.\n\nMotif (obligatoire) :');
+  if (motif == null) return;
+  if (motif.trim().length < 3) return msg('msgVentes', 'err', 'Motif obligatoire (3 caractères minimum).');
+  const r = await appel('annuler_vente', { vente_id: b.dataset.annuler, motif }, 'msgVentes');
+  if (r.ok) { msg('msgVentes', 'ok', `Vente annulée : ${r.articles_remis} article(s) remis en vente.`); toutCharger(); }
+};
+
+// ---------- Recherche / correction ----------
+async function chercher() {
+  const q = $('chercheIn').value.trim();
+  if (q.length < 2) return msg('msgCherche', 'err', 'Tapez au moins 2 caractères.');
+  const r = await appel('recherche', { q }, 'msgCherche');
+  if (!r.ok) return;
+  msg('msgCherche', r.resultats.length ? 'mute' : 'err', r.resultats.length ? r.resultats.length + ' résultat(s)' + (r.resultats.length === 50 ? ' (50 max.)' : '') : 'Aucun article ne correspond.');
+  const ETIQ = { vierge: 'non déposé', depose: 'en vente', vendu: 'vendu', restitue: 'rendu', donne: 'donné' };
+  $('resultats').innerHTML = r.resultats.length ? `<thead><tr><th>Article</th><th>Description</th><th class="d">Prix</th><th>Statut</th><th></th></tr></thead><tbody>` +
+    r.resultats.map(a => `<tr><td>${esc(a.code.replace(/^\d{2}-/, ''))}</td><td>${esc(a.description)}</td><td class="d">${eur(a.prix)}</td>
+      <td>${esc(ETIQ[a.statut] || a.statut)}${a.vente_id ? `<br><span class="petit note">${esc(a.vente_id).slice(0, 8)}…</span>` : ''}</td>
+      <td>${a.statut === 'vierge' || a.statut === 'depose' ? `<button class="btn mini" data-corriger="${esc(a.code)}" data-prix="${a.prix == null ? '' : a.prix}">Corriger le prix</button>` : ''}</td></tr>`).join('') + '</tbody>' : '';
+}
+$('chercheBtn').onclick = chercher;
+$('chercheIn').onkeydown = e => { if (e.key === 'Enter') chercher(); };
+$('resultats').onclick = async e => {
+  const b = e.target.closest('[data-corriger]'); if (!b) return;
+  const court = b.dataset.corriger.replace(/^\d{2}-/, '');
+  const prix = prompt(`Nouveau prix pour ${court} (actuel : ${b.dataset.prix ? b.dataset.prix + ' €' : 'aucun'}) :`);
+  if (prix == null || !prix.trim()) return;
+  const motif = prompt('Motif de la correction (obligatoire) :');
+  if (motif == null) return;
+  const r = await appel('corriger_prix', { code: b.dataset.corriger, prix: prix.trim(), motif }, 'msgCherche');
+  if (r.ok) { await chercher(); msg('msgCherche', 'ok', `Prix de ${court} corrigé : ${eur(r.article.prix)} (tracé au journal).`); chargerJournal(); }
+};
+
+// ---------- Vente papier ----------
+$('papierBtn').onclick = async () => {
+  const codes = $('papierCodes').value.split(/[,;\s]+/).filter(Boolean);
+  if (!codes.length) return msg('msgPapier', 'err', 'Indiquez au moins un code.');
+  const totalTxt = $('papierTotal').value.trim().replace(',', '.');
+  const params = { vente_id: BJ.uid(), caisse: $('papierCaisse').value.trim() || 'papier', paiement: $('papierPaiement').value, codes, heure: new Date().toISOString() };
+  if (totalTxt) params.total = Number(totalTxt);
+  BJ.session.caisse = params.caisse;
+  const r = await appel('vente', params, 'msgPapier');
+  BJ.session.caisse = '';
+  if (!r.ok) return;
+  msg('msgPapier', r.anomalies.length ? 'warn' : 'ok', `Vente enregistrée : ${eur2(r.total)}` + (r.anomalies.length ? ' · À VÉRIFIER : ' + r.anomalies.join(' ; ') : ''));
+  $('papierCodes').value = ''; $('papierTotal').value = '';
+  toutCharger();
+};
+
+// ---------- Génération ----------
+$('genBtn').onclick = async () => {
+  const r = await appel('generer', { lettres: $('genLettres').value, nb: Number($('genNb').value) }, 'msgGen');
+  if (!r.ok) return;
+  const c = r.creees.map(g => g.replace(/^\d{2}-/, ''));
+  msg('msgGen', 'ok', c.length ? c.length + ' grille(s) créée(s) : ' + c.join(', ') : 'Aucune nouvelle grille (elles existent déjà).');
+  chargerJournal();
+};
+
+// ---------- Journal ----------
+async function chargerJournal() {
+  const r = await appel('journal', { n: 60 });
+  if (!r.ok) return;
+  $('journal').innerHTML = r.lignes.map(l => `<tr><td class="petit">${esc(heure(l[0]))}</td><td>${esc(l[1])}${l[2] ? ' ' + esc(l[2]) : ''}</td><td>${esc(l[3])}</td><td class="petit">${esc(String(l[4]).replace(/^\d{2}-/, ''))}</td><td class="petit">${esc(l[5])}</td><td class="petit">${esc(l[6])}</td><td class="petit">${esc(l[7])}</td></tr>`).join('')
+    || '<tr><td colspan="7" class="note">Vide.</td></tr>';
+}
+
+async function toutCharger() { await Promise.all([chargerTableau(), chargerVentes(), chargerJournal()]); }
+$('rafraichir').onclick = toutCharger;
+$('quitter').onclick = () => BJ.deconnexion('pinAdmin');
+
+// ---------- Démarrage ----------
+const r = await BJ.connexion({ titre: 'Admin', roles: ['admin'], cle: 'pinAdmin', session: true, nomCode: 'admin' });
+mode = r.mode; afficherModes();
+await toutCharger();
+setInterval(() => { if (!document.hidden) { chargerTableau(); chargerVentes(); } }, 30000);
+})();
+</script>
+</body>
+</html>

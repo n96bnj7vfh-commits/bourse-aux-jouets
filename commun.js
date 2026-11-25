@@ -174,5 +174,66 @@ const BJ = (() => {
     return s;
   }
 
-  return { $, esc, deux, eur, eur2, appareil, uid, session, api, lireCode, debloquerSon, son, garderEcranAllume, relacherEcran, creerScanner, expliquerErreurCamera };
+  // Le premier appui n'importe où débloque le son (iPhone)
+  document.addEventListener('pointerdown', debloquerSon, { passive: true });
+
+  // ---------- Modes ----------
+  const MODES = {
+    preparation: ['Préparation', '#6b7280'], listing: ['Listing (dépôt)', '#3b82f6'], vente: ['Vente', '#1f8a4c'],
+    restitution: ['Restitution', '#b7791f'], cloture: ['Clôture', '#6b7280'],
+  };
+  function badgeMode(mode) {
+    const m = MODES[mode] || [mode, '#6b7280'];
+    return `<span class="pastille"><span style="width:9px;height:9px;border-radius:50%;background:${m[1]}"></span>${esc(m[0])}</span>`;
+  }
+
+  // ---------- Connexion par code PIN (écran plein) ----------
+  // opts : { titre, roles: ['listing'], cle: 'pinListing', session: true pour ne garder le code que dans l'onglet }
+  // Renvoie une promesse résolue avec la réponse « connexion » ({ role, mode, edition, taux }).
+  function connexion(opts) {
+    const st = opts.session ? sessionStorage : localStorage;
+    return new Promise(resolve => {
+      const div = document.createElement('div');
+      div.className = 'plein';
+      div.innerHTML = `<div class="card"><h2>${esc(opts.titre)}</h2>
+        <p class="note" style="margin-top:8px">Code PIN ${esc(opts.nomCode || opts.roles[0])} :</p>
+        <input type="password" inputmode="numeric" autocomplete="off" style="width:100%;text-align:center;font-size:22px;letter-spacing:6px">
+        <p class="msg err"></p><button class="btn p big">Entrer</button></div>`;
+      document.body.appendChild(div);
+      const champ = div.querySelector('input'), msg = div.querySelector('.msg'), bouton = div.querySelector('button');
+      async function essayer(pin, discret) {
+        session.pin = pin;
+        bouton.disabled = true;
+        try {
+          const r = await BJ.api('connexion');
+          if (r.ok && (opts.roles.includes(r.role) || r.role === 'admin')) {
+            st.setItem(opts.cle, pin);
+            div.remove();
+            resolve(r);
+            return;
+          }
+          if (!discret) msg.textContent = r.ok ? "Ce code ne donne pas accès à cet écran." : r.erreur;
+        } catch (e) {
+          if (!discret) msg.textContent = 'Pas de réseau : impossible de vérifier le code.';
+        } finally {
+          bouton.disabled = false;
+        }
+        session.pin = '';
+        st.removeItem(opts.cle);
+        champ.focus();
+      }
+      bouton.onclick = () => { const v = champ.value.trim(); if (v) essayer(v, false); else msg.textContent = 'Tapez le code PIN.'; };
+      champ.onkeydown = e => { if (e.key === 'Enter') bouton.onclick(); };
+      const memo = st.getItem(opts.cle);
+      if (memo) essayer(memo, true); else champ.focus();
+    });
+  }
+  function deconnexion(cle) {
+    localStorage.removeItem(cle); sessionStorage.removeItem(cle);
+    session.pin = '';
+    location.reload();
+  }
+
+  return { $, esc, deux, eur, eur2, appareil, uid, session, api, lireCode, debloquerSon, son, garderEcranAllume, relacherEcran,
+    creerScanner, expliquerErreurCamera, MODES, badgeMode, connexion, deconnexion };
 })();

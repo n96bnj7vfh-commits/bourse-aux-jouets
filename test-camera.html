@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Test caméra – Bourse aux jouets</title>
+<!-- Bibliothèque de scan (version figée). Pour le test seulement : elle sera copiée dans le dépôt pour la vraie version. -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f4f4f2; color: #1d1d1b; }
+  header { padding: 12px 16px; background: #1f4e79; color: #fff; }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: .85; }
+  main { padding: 12px 16px 40px; max-width: 560px; margin: 0 auto; }
+  #reader { width: 100%; background: #000; border-radius: 10px; overflow: hidden; min-height: 60px; }
+  .buttons { display: flex; gap: 8px; margin: 12px 0; }
+  button { flex: 1; font-size: 17px; padding: 14px; border: 0; border-radius: 10px; font-weight: 600; }
+  #start { background: #2e7d32; color: #fff; }
+  #stop { background: #b71c1c; color: #fff; }
+  #clear { background: #ddd; color: #333; }
+  button:disabled { opacity: .4; }
+  #status { padding: 10px 12px; border-radius: 10px; background: #fff; font-size: 15px; margin-bottom: 10px; }
+  #last { font-size: 30px; font-weight: 700; text-align: center; padding: 14px; border-radius: 10px; background: #fff; margin-bottom: 10px; min-height: 70px; transition: background .2s; }
+  #last.ok { background: #c8e6c9; }
+  #last.again { background: #fff3c4; }
+  #last.bad { background: #ffcdd2; }
+  .counters { display: flex; gap: 8px; margin-bottom: 10px; }
+  .counters div { flex: 1; background: #fff; border-radius: 10px; padding: 8px; text-align: center; font-size: 12px; }
+  .counters b { display: block; font-size: 22px; }
+  ol { background: #fff; border-radius: 10px; padding: 10px 10px 10px 40px; margin: 0; font-size: 15px; }
+  ol li { padding: 3px 0; border-bottom: 1px solid #eee; }
+  ol li small { color: #777; }
+  .tag-bad { color: #b71c1c; font-weight: 600; }
+  .tag-again { color: #8a6d00; }
+  .panel { background: #fff; border-radius: 10px; padding: 8px 12px; margin-top: 8px; }
+  .row { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+  .row > span { width: 52px; font-weight: 600; }
+  .row input[type=range] { flex: 1; height: 32px; }
+  .row b { width: 44px; text-align: right; }
+  .chips { display: flex; gap: 6px; flex: 1; }
+  #zoomChips { margin-top: 6px; padding-left: 62px; }
+  .chips button { flex: 1; padding: 9px 4px; font-size: 15px; background: #e8e8e6; color: #333; }
+  .chips button.on { background: #1f4e79; color: #fff; }
+  details { margin-top: 16px; font-size: 13px; color: #555; }
+  pre { white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Test caméra – scan continu</h1>
+  <p>Étape 0 du plan : vérifier le scan des QR sur iPhone et Android. <b>Version 2</b> (zoom + viseur)</p>
+</header>
+<main>
+  <div id="reader"></div>
+
+  <div class="panel" id="zoomBox" hidden>
+    <div class="row"><span>Zoom</span><input type="range" id="zoom"><b id="zoomVal">1×</b></div>
+    <div class="chips" id="zoomChips"></div>
+  </div>
+  <div class="panel">
+    <div class="row"><span>Viseur</span>
+      <div class="chips" id="viewChips">
+        <button data-v="petit">Petit</button><button data-v="moyen">Moyen</button><button data-v="grand">Grand</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="buttons">
+    <button id="start">▶ Démarrer</button>
+    <button id="stop" disabled>■ Arrêter</button>
+  </div>
+
+  <div id="status">Appuyez sur « Démarrer » puis autorisez la caméra.</div>
+  <div id="last">—</div>
+
+  <div class="counters">
+    <div><b id="nOk">0</b>codes lus</div>
+    <div><b id="nAgain">0</b>relus (déjà vus)</div>
+    <div><b id="nBad">0</b>format refusé</div>
+  </div>
+
+  <ol id="list" reversed></ol>
+
+  <div class="buttons"><button id="clear">Vider la liste</button></div>
+
+  <details>
+    <summary>Infos techniques (à copier si problème)</summary>
+    <pre id="info"></pre>
+  </details>
+</main>
+
+<script>
+// ---- Règles des codes (cahier des charges) ----
+// Grille : 27-A1   Article : 27-A1-03   Lettres : toutes sauf I et O. Chiffre de grille : 1 à 99. Article : 01 à 08.
+const RE_CODE = /^(\d{2})-([A-HJ-NP-Z])([1-9]\d?)(?:-(0[1-8]))?$/;
+const IGNORE_MS = 3000; // même code relu en moins de 3 s : ignoré
+
+const $ = id => document.getElementById(id);
+const seen = new Map();  // code -> nombre de lectures
+let lastCode = null, lastTime = 0;
+let scanner = null;
+let audio = null;
+let counts = { ok: 0, again: 0, bad: 0 };
+
+// ---- Sons (Web Audio, débloqué par l'appui sur « Démarrer », obligatoire sur iPhone) ----
+function unlockAudio() {
+  if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+  if (audio.state === 'suspended') audio.resume();
+}
+function tone(freq, start, dur, vol = 0.25, type = 'sine') {
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, audio.currentTime + start);
+  g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + start + dur);
+  o.connect(g).connect(audio.destination);
+  o.start(audio.currentTime + start); o.stop(audio.currentTime + start + dur + 0.02);
+}
+function sound(kind) {
+  if (!audio) return;
+  if (kind === 'ok')    tone(1500, 0, 0.12, 0.3, 'square');
+  if (kind === 'again') tone(600, 0, 0.18, 0.12);
+  if (kind === 'bad')   { tone(220, 0, 0.18, 0.3, 'sawtooth'); tone(180, 0.22, 0.25, 0.3, 'sawtooth'); }
+  if (navigator.vibrate) navigator.vibrate(kind === 'bad' ? [80, 60, 80] : 40);
+}
+
+// ---- Traitement d'un code lu ----
+function onScan(text) {
+  const now = Date.now();
+  const code = text.trim();
+  if (code === lastCode && now - lastTime < IGNORE_MS) { lastTime = now; return; }
+  lastCode = code; lastTime = now;
+
+  const time = new Date().toLocaleTimeString('fr-FR');
+  const m = code.match(RE_CODE);
+  let kind, label;
+  if (!m) {
+    kind = 'bad'; label = 'format refusé'; counts.bad++;
+  } else if (seen.has(code)) {
+    kind = 'again'; label = 'déjà lu'; counts.again++;
+    seen.set(code, seen.get(code) + 1);
+  } else {
+    kind = 'ok'; counts.ok++;
+    seen.set(code, 1);
+    label = m[4] ? `article ${m[4]} – grille ${m[2]}${m[3]} – édition 20${m[1]}` : `grille ${m[2]}${m[3]} – édition 20${m[1]}`;
+  }
+  sound(kind);
+
+  const last = $('last');
+  last.textContent = code;
+  last.className = kind;
+
+  const li = document.createElement('li');
+  li.innerHTML = `<b></b> <small>${time}</small> <span class="${kind === 'bad' ? 'tag-bad' : kind === 'again' ? 'tag-again' : ''}"></span>`;
+  li.querySelector('b').textContent = code;
+  li.querySelector('span').textContent = label;
+  $('list').prepend(li);
+
+  $('nOk').textContent = counts.ok;
+  $('nAgain').textContent = counts.again;
+  $('nBad').textContent = counts.bad;
+}
+
+// ---- Démarrage / arrêt de la caméra ----
+async function start() {
+  unlockAudio();
+  $('start').disabled = true;
+  setStatus('Ouverture de la caméra…');
+  try {
+    scanner = scanner || new Html5Qrcode('reader', { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], verbose: false });
+    await scanner.start(
+      { facingMode: 'environment' },
+      // Seule la zone du viseur est analysée : un petit viseur évite de lire le QR voisin.
+      { fps: 10, qrbox: (w, h) => { const s = Math.max(80, Math.floor(Math.min(w, h) * VIEWS[view])); return { width: s, height: s }; } },
+      onScan,
+      () => {} // aucune détection sur cette image : normal, on ignore
+    );
+    $('stop').disabled = false;
+    const zoomOk = setupZoom();
+    setStatus('✅ Caméra active. Présentez les QR un par un.' + (zoomOk ? '' : ' (Zoom non disponible sur ce téléphone : utilisez le petit viseur.)'));
+  } catch (e) {
+    $('start').disabled = false;
+    setStatus('❌ Caméra impossible : ' + explain(e));
+    info('Erreur : ' + (e && (e.name || '') + ' ' + (e.message || e)));
+  }
+}
+async function stop(silent) {
+  if (scanner && scanner.isScanning) await scanner.stop();
+  $('zoomBox').hidden = true;
+  $('stop').disabled = true; $('start').disabled = false;
+  if (!silent) setStatus('Caméra arrêtée.');
+}
+
+// ---- Viseur (taille de la zone analysée), mémorisé sur le téléphone ----
+const VIEWS = { petit: 0.4, moyen: 0.6, grand: 0.85 };
+let view = localStorage.getItem('viseur') || 'moyen';
+function showView() {
+  document.querySelectorAll('#viewChips button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
+}
+document.querySelectorAll('#viewChips button').forEach(b => b.onclick = async () => {
+  view = b.dataset.v; localStorage.setItem('viseur', view); showView();
+  if (scanner && scanner.isScanning) { await stop(true); start(); } // le viseur ne change qu'au redémarrage
+});
+showView();
+
+// ---- Zoom de la caméra (si le téléphone le permet), mémorisé sur le téléphone ----
+function setupZoom() {
+  let caps;
+  try { caps = scanner.getRunningTrackCapabilities(); } catch (e) { info('Zoom : lecture impossible (' + e + ')'); return false; }
+  const z = caps && caps.zoom;
+  if (!z || !(z.max > z.min)) { info('Zoom : non pris en charge par ce navigateur'); return false; }
+  const min = z.min, max = Math.min(z.max, 8), step = z.step || 0.1;
+  info(`Zoom : de ${min} à ${z.max} (pas ${step})`);
+  const slider = $('zoom');
+  slider.min = min; slider.max = max; slider.step = step;
+  const saved = parseFloat(localStorage.getItem('zoom'));
+  applyZoom(isNaN(saved) ? min : Math.min(max, Math.max(min, saved)));
+  slider.oninput = () => applyZoom(+slider.value);
+  const chips = $('zoomChips'); chips.innerHTML = '';
+  for (const v of [1, 1.5, 2, 3, 4]) {
+    if (v < min || v > max) continue;
+    const b = document.createElement('button'); b.textContent = v + '×'; b.dataset.z = v;
+    b.onclick = () => applyZoom(v);
+    chips.appendChild(b);
+  }
+  $('zoomBox').hidden = false;
+  return true;
+}
+let zoomTimer = null;
+function applyZoom(v) {
+  $('zoom').value = v;
+  $('zoomVal').textContent = (Math.round(v * 10) / 10) + '×';
+  document.querySelectorAll('#zoomChips button').forEach(b => b.classList.toggle('on', +b.dataset.z === v));
+  localStorage.setItem('zoom', v);
+  clearTimeout(zoomTimer); // on n'envoie pas 50 ordres à la caméra pendant qu'on fait glisser
+  zoomTimer = setTimeout(() => {
+    scanner.applyVideoConstraints({ advanced: [{ zoom: v }] }).catch(e => info('Zoom refusé : ' + e));
+  }, 80);
+}
+function explain(e) {
+  const s = String(e && (e.name || e.message || e));
+  if (!window.isSecureContext) return 'la page doit être ouverte en https://';
+  if (/NotAllowed|Permission/i.test(s)) return 'autorisation refusée. Autorisez la caméra dans les réglages du navigateur, puis rechargez.';
+  if (/NotFound|Overconstrained/i.test(s)) return 'aucune caméra arrière trouvée.';
+  if (/NotReadable|in use/i.test(s)) return 'caméra déjà utilisée par une autre appli.';
+  return s;
+}
+function setStatus(t) { $('status').textContent = t; }
+function info(t) { $('info').textContent += t + '\n'; }
+
+$('start').onclick = start;
+$('stop').onclick = () => stop();
+$('clear').onclick = () => {
+  seen.clear(); lastCode = null; counts = { ok: 0, again: 0, bad: 0 };
+  $('list').innerHTML = ''; $('last').textContent = '—'; $('last').className = '';
+  $('nOk').textContent = $('nAgain').textContent = $('nBad').textContent = '0';
+};
+
+// Infos utiles pour le compte rendu de test
+info('Navigateur : ' + navigator.userAgent);
+info('HTTPS : ' + (window.isSecureContext ? 'oui' : 'NON'));
+info('Bibliothèque chargée : ' + (typeof Html5Qrcode !== 'undefined' ? 'oui' : 'NON'));
+if (typeof Html5Qrcode === 'undefined') setStatus('❌ La bibliothèque de scan ne s\'est pas chargée (réseau ?). Rechargez la page.');
+</script>
+</body>
+</html>

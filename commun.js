@@ -19,17 +19,22 @@ const BJ = (() => {
 
   // ---------- Serveur ----------
   // POST en text/plain : requête « simple », sans pré-vérification CORS.
-  const session = { pin: '', caisse: '' };
+  // Après la connexion, le téléphone ne garde PAS le code PIN : seulement un jeton donné par le serveur
+  // (valable 4 jours, annulé si le PIN change). Le PIN n'est envoyé qu'au moment de la connexion.
+  const session = { pin: '', jeton: '', caisse: '' };
   async function api(action, params) {
     const ctrl = new AbortController();
     const minuterie = setTimeout(() => ctrl.abort(), 25000);
     try {
-      const corps = Object.assign({ action, pin: session.pin, appareil: appareil(), caisse: session.caisse }, params || {});
+      const ident = session.jeton ? { jeton: session.jeton } : { pin: session.pin };
+      const corps = Object.assign({ action, appareil: appareil(), caisse: session.caisse }, ident, params || {});
       const rep = await fetch(CONFIG.API, {
         method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(corps), signal: ctrl.signal,
       });
-      return await rep.json(); // { ok: true, ... } ou { ok: false, erreur }
+      const r = await rep.json(); // { ok: true, ... } ou { ok: false, erreur }
+      if (action !== 'connexion') siSessionExpiree(r);
+      return r;
     } finally {
       clearTimeout(minuterie);
     } // une exception = problème réseau (à réessayer)
@@ -201,13 +206,16 @@ const BJ = (() => {
         <p class="msg err"></p><button class="btn p big">Entrer</button></div>`;
       document.body.appendChild(div);
       const champ = div.querySelector('input'), msg = div.querySelector('.msg'), bouton = div.querySelector('button');
-      async function essayer(pin, discret) {
-        session.pin = pin;
+      // ident = { pin } (saisi) ou { jeton } (mémorisé sur l'appareil)
+      async function essayer(ident, discret) {
+        session.pin = ident.pin || ''; session.jeton = ident.jeton || '';
         bouton.disabled = true;
         try {
           const r = await BJ.api('connexion');
           if (r.ok && (opts.roles.includes(r.role) || r.role === 'admin')) {
-            st.setItem(opts.cle, pin);
+            session.pin = '';                    // le PIN est oublié tout de suite
+            session.jeton = r.jeton || session.jeton;
+            st.setItem(opts.cle, session.jeton);  // seul le jeton est gardé
             div.remove();
             resolve(r);
             return;
@@ -218,22 +226,33 @@ const BJ = (() => {
         } finally {
           bouton.disabled = false;
         }
-        session.pin = '';
+        session.pin = ''; session.jeton = '';
         st.removeItem(opts.cle);
         champ.focus();
       }
-      bouton.onclick = () => { const v = champ.value.trim(); if (v) essayer(v, false); else msg.textContent = 'Tapez le code PIN.'; };
+      bouton.onclick = () => { const v = champ.value.trim(); if (v) essayer({ pin: v }, false); else msg.textContent = 'Tapez le code PIN.'; };
       champ.onkeydown = e => { if (e.key === 'Enter') bouton.onclick(); };
+      ['pinListing', 'pinRestitution', 'pinAdmin'].forEach(k => { localStorage.removeItem(k); sessionStorage.removeItem(k); }); // anciennes versions : PIN en clair
+      cleSession = opts.cle;
       const memo = st.getItem(opts.cle);
-      if (memo) essayer(memo, true); else champ.focus();
+      if (memo) essayer({ jeton: memo }, true); else champ.focus();
     });
   }
+  let cleSession = '';
   function deconnexion(cle) {
-    localStorage.removeItem(cle); sessionStorage.removeItem(cle);
-    session.pin = '';
+    localStorage.removeItem(cle || cleSession); sessionStorage.removeItem(cle || cleSession);
+    session.pin = ''; session.jeton = '';
     location.reload();
+  }
+  // Jeton expiré ou PIN changé pendant l'utilisation : retour à l'écran de connexion
+  // (la caisse remplace ce comportement pour ne rien perdre de sa file d'attente)
+  let surSessionExpiree = () => deconnexion();
+  function siSessionExpiree(r) {
+    if (r && !r.ok && /Session expirée/.test(r.erreur || '')) surSessionExpiree();
+    return r;
   }
 
   return { $, esc, deux, eur, eur2, appareil, uid, session, api, lireCode, debloquerSon, son, garderEcranAllume, relacherEcran,
-    creerScanner, expliquerErreurCamera, MODES, badgeMode, connexion, deconnexion };
+    creerScanner, expliquerErreurCamera, MODES, badgeMode, connexion, deconnexion,
+    set surSessionExpiree(f) { surSessionExpiree = f; } };
 })();

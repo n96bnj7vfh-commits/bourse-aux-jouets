@@ -158,10 +158,10 @@ async function verifierMode() {
   afficher();
   if (!scanner.actif && !document.hidden) scanner.demarrer().catch(e => msg('err', 'Caméra : ' + BJ.expliquerErreurCamera(e) + ' (vous pouvez taper les codes).'));
 }
-$('quitter').onclick = () => BJ.deconnexion('pinRestitution');
+$('quitter').onclick = () => BJ.deconnexion('jetonRestitution');
 document.addEventListener('visibilitychange', () => { if (document.hidden) scanner.arreter(); else verifierMode(); });
 
-const r = await BJ.connexion({ titre: 'Restitution', roles: ['restitution'], cle: 'pinRestitution' });
+const r = await BJ.connexion({ titre: 'Restitution', roles: ['restitution'], cle: 'jetonRestitution' });
 edition = r.edition; mode = r.mode;
 msg('mute', 'Scannez les grilles du vendeur.');
 await verifierMode();

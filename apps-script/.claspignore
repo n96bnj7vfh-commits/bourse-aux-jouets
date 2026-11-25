@@ -1,0 +1,4 @@
+# clasp n'envoie à Apps Script que le script et son manifeste
+**/**
+!Code.gs
+!appsscript.json

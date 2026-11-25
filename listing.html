@@ -9,17 +9,31 @@
 <script src="config.js"></script>
 <script src="commun.js"></script>
 <style>
-  .barre { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-  .barre button { flex: 1 0 22%; padding: 6px 4px; border: 1px solid var(--line); background: var(--soft); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; min-height: 44px; }
+  /* Saisie : tout doit tenir sur un écran d'iPhone, barre de Safari comprise (pas de défilement) */
+  .entete { padding: 8px 14px; }
+  .page { padding-bottom: 130px; gap: 8px; padding-top: 8px; }
+  #zoneGrille.card { padding: 10px 12px; }
+  .titreg { display: flex; justify-content: space-between; align-items: baseline; }
+  .titreg h2 { font-size: 20px; }
+  .barre { display: flex; gap: 4px; margin-top: 6px; }
+  .barre button { flex: 1 1 0; padding: 3px 0; border: 1px solid var(--line); background: var(--soft); border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; min-height: 40px; line-height: 1.1; }
   .barre button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
-  .barre button small { display: block; font-weight: 500; font-size: 12px; opacity: .8; }
-  .affiche { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--soft); margin-top: 10px; }
-  .affiche .nombre { font-size: clamp(40px, 12vw, 60px); line-height: 1; }
-  .rapides { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
-  .rapides button { white-space: nowrap; padding: 0 2px; font-weight: 700; font-size: 16px; min-height: 52px; border-radius: 12px; border: 2px solid var(--acc); background: transparent; color: var(--acc); cursor: pointer; }
-  .pave { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
-  .pave button { font-weight: 600; font-size: 26px; min-height: 58px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); cursor: pointer; }
-  .trois { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+  .barre button small { display: block; font-weight: 500; font-size: 10px; opacity: .8; white-space: nowrap; }
+  .affiche { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 4px 14px; border-radius: 12px; background: var(--soft); margin-top: 6px; }
+  .affiche .nombre { font-size: 44px; line-height: 1.1; }
+  .msgg { font-size: 14px; font-weight: 600; margin: 4px 0 0; min-height: 0; }
+  .msgg.ok { color: var(--ok); } .msgg.warn { color: var(--warn); } .msgg.err { color: var(--err); }
+  #descIn { width: 100%; margin-top: 6px; min-height: 40px; padding: 7px 12px; }
+  .rapides { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+  .rapides button { white-space: nowrap; padding: 0 2px; font-weight: 700; font-size: 15px; min-height: 42px; border-radius: 10px; border: 2px solid var(--acc); background: transparent; color: var(--acc); cursor: pointer; }
+  .pave { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+  .pave button { font-weight: 600; font-size: 24px; min-height: 46px; border-radius: 10px; border: 1px solid var(--line); background: var(--soft); cursor: pointer; }
+  /* Boutons d'action fixés en bas, au-dessus de la barre de Safari */
+  .actions { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--bg); box-shadow: 0 -6px 16px rgba(24,33,58,.12); padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+  .actions > div { max-width: 1000px; margin: 0 auto; }
+  .actions .btn.big { font-size: 20px; padding: 11px; }
+  .trois { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+  .trois .btn { min-height: 40px; padding: 6px 4px; font-size: 15px; }
   .recap li button { flex: 1; text-align: left; background: none; border: 0; padding: 4px 0; cursor: pointer; font-size: 16px; }
   .totalg { display: flex; justify-content: space-between; align-items: center; background: var(--ink); color: #fff; border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
   .totalg .nombre { font-size: 30px; }
@@ -155,28 +169,31 @@ function afficher() {
   $('zoneScan').hidden = !!L;
   $('zoneGrille').hidden = !L;
   if (!L) return;
-  const m = L.message ? `<p class="msg ${L.message[0]}" role="status">${esc(L.message[1])}</p>` : '<p class="msg"></p>';
+  const m = L.message ? `<p class="msgg ${L.message[0]}" role="status">${esc(L.message[1])}</p>` : '';
   if (L.recap) {
     const total = L.prix.reduce((s, v) => s + (v || 0), 0);
-    $('zoneGrille').innerHTML = `<h2>Grille ${esc(L.court)} · récapitulatif</h2>${m}
+    $('zoneGrille').innerHTML = `<div class="titreg"><h2>Grille ${esc(L.court)} · récapitulatif</h2></div>${m}
       <p class="note">Touchez une ligne pour la corriger.</p>
       <ul class="lignes recap">${L.prix.map((v, i) => `<li><button data-a="corriger" data-v="${i}">${esc(L.court)}-${deux(i + 1)}${L.desc[i] ? ' · ' + esc(L.desc[i]) : ''}</button>
         <span class="nombre">${vendu(i) ? '<span class="tag t-ok">vendu</span> ' : ''}${v == null ? '<span class="tag t-n">non déposé</span>' : eur(v)}</span></li>`).join('')}</ul>
       <div class="totalg"><span>${L.prix.filter(v => v != null).length} article(s)</span><span class="nombre">${eur2(total)}</span></div>
-      <button class="btn p big" data-a="enregistrer">Valider la grille</button>
-      <button class="btn" data-a="abandonner" style="width:100%;margin-top:8px">Abandonner</button>`;
+      <div class="actions"><div>
+        <button class="btn p big" data-a="enregistrer">Valider la grille</button>
+        <button class="btn" data-a="abandonner" style="width:100%;margin-top:6px;min-height:40px">Abandonner</button>
+      </div></div>`;
     return;
   }
-  $('zoneGrille').innerHTML = `<div class="rangee" style="justify-content:space-between"><h2>${esc(L.court)} · Article ${L.idx + 1} / 8</h2><span class="note">${esc(L.court)}-${deux(L.idx + 1)}</span></div>
+  $('zoneGrille').innerHTML = `<div class="titreg"><h2>${esc(L.court)} · Article ${L.idx + 1} / 8</h2><span class="note">${esc(L.court)}-${deux(L.idx + 1)}</span></div>
     <div class="barre">${L.prix.map((v, i) => `<button class="${i === L.idx ? 'on' : ''}" data-a="aller" data-v="${i}">${i + 1}<small>${v == null ? '—' : eur(v)}</small></button>`).join('')}</div>
     <div class="affiche"><span class="note">Prix</span><span class="nombre">${L.buf ? esc(L.buf) + ' €' : '<span style="opacity:.3">0 €</span>'}</span></div>
-    <input id="descIn" value="${esc(L.desc[L.idx])}" placeholder="Description (facultatif) : puzzle Cars…" autocomplete="off" maxlength="200" style="width:100%;margin-top:10px">
+    ${m}
+    <input id="descIn" value="${esc(L.desc[L.idx])}" placeholder="Description (facultatif) : puzzle Cars…" autocomplete="off" maxlength="200">
     <div class="rapides">${[0.5, 1, 2, 3, 5].map(v => `<button data-a="rapide" data-v="${v}">${eur(v)}</button>`).join('')}</div>
     <div class="pave">${['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', '⌫'].map(k => `<button data-a="touche" data-v="${k}" aria-label="${k === '⌫' ? 'effacer' : k}">${k}</button>`).join('')}</div>
-    ${m}
-    <button class="btn p big" data-a="valider">Valider ce prix</button>
-    <div class="trois"><button class="btn" data-a="precedent" ${L.idx === 0 ? 'disabled' : ''}>← Précédent</button><button class="btn" data-a="passer">Passer</button><button class="btn d" data-a="fin">Fin de grille</button></div>
-    <p class="note" style="margin-top:8px">Les boutons rouges remplissent le prix, « Valider » le confirme. « Fin de grille » garde les prix déjà saisis.</p>`;
+    <div class="actions"><div>
+      <button class="btn p big" data-a="valider">Valider ce prix</button>
+      <div class="trois"><button class="btn" data-a="precedent" ${L.idx === 0 ? 'disabled' : ''}>← Précédent</button><button class="btn" data-a="passer">Passer</button><button class="btn d" data-a="fin">Fin de grille</button></div>
+    </div></div>`;
   $('descIn').oninput = e => { L.desc[L.idx] = e.target.value; };
 }
 $('zoneGrille').onclick = e => { const b = e.target.closest('[data-a]'); if (b && !b.disabled) action(b.dataset.a, b.dataset.v); };
@@ -195,11 +212,11 @@ async function verifierMode() {
   else if (!L && !scanner.actif && !document.hidden) scanner.demarrer().catch(e => msgScan('err', 'Caméra : ' + BJ.expliquerErreurCamera(e) + ' (vous pouvez taper le code).'));
 }
 $('fermeBtn').onclick = verifierMode;
-$('quitter').onclick = () => BJ.deconnexion('pinListing');
+$('quitter').onclick = () => BJ.deconnexion('jetonListing');
 document.addEventListener('visibilitychange', () => { if (document.hidden) scanner.arreter(); else verifierMode(); });
 
 // ---------- Démarrage ----------
-const r = await BJ.connexion({ titre: 'Listing (dépôt)', roles: ['listing'], cle: 'pinListing' });
+const r = await BJ.connexion({ titre: 'Listing (dépôt)', roles: ['listing'], cle: 'jetonListing' });
 edition = r.edition;
 msgScan('mute', 'Présentez le QR de la grille.');
 await verifierMode();

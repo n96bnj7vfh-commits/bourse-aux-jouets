@@ -1,0 +1,10 @@
+# Identifiants de connexion de clasp (Google) : ne JAMAIS les publier
+.clasprc.json
+# Réglages locaux de Claude Code et fichiers de travail
+.claude/
+# Documents pour le bureau (pas utiles sur le site)
+presentation/
+# Fichiers système
+Thumbs.db
+desktop.ini
+.DS_Store

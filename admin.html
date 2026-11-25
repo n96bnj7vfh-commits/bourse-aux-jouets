@@ -47,7 +47,7 @@
   <div class="deuxcol">
     <section class="card">
       <h2>Caisses (pour la trésorière)</h2>
-      <table><thead><tr><th>Caisse</th><th class="d">Ventes</th><th class="d">Espèces</th><th class="d">Chèques</th><th class="d">Total</th></tr></thead><tbody id="caisses"></tbody></table>
+      <table><thead><tr><th>Caisse</th><th class="d">Ventes</th><th class="d">Espèces</th><th class="d">Chèques</th><th class="d">Carte</th><th class="d">Total</th></tr></thead><tbody id="caisses"></tbody></table>
       <p class="note">Montants réellement encaissés, ventes annulées exclues.</p>
     </section>
 
@@ -71,7 +71,7 @@
       <p class="note">Si une caisse a dû noter des ventes sur papier : recopier ici chaque vente.</p>
       <textarea id="papierCodes" placeholder="Codes des articles, séparés par des virgules : A1-03, B2-05"></textarea>
       <div class="rangee" style="margin-top:8px">
-        <select id="papierPaiement"><option value="especes">Espèces</option><option value="cheque">Chèque</option></select>
+        <select id="papierPaiement"><option value="especes">Espèces</option><option value="cheque">Chèque</option><option value="carte">Carte</option></select>
         <input id="papierCaisse" value="papier" style="width:120px" aria-label="Caisse">
         <input id="papierTotal" inputmode="decimal" placeholder="montant encaissé" style="width:160px">
         <button class="btn d" id="papierBtn">Enregistrer la vente</button>
@@ -123,7 +123,7 @@ async function appel(action, params, idMsg) {
   try {
     const r = await BJ.api(action, params);
     if (!r.ok && idMsg) msg(idMsg, 'err', r.erreur);
-    if (!r.ok && /PIN/.test(r.erreur || '')) BJ.deconnexion('pinAdmin');
+    if (!r.ok && /PIN/.test(r.erreur || '')) BJ.deconnexion('jetonAdmin');
     return r;
   } catch (e) {
     if (idMsg) msg(idMsg, 'err', 'Pas de réseau : réessayez.');
@@ -169,16 +169,17 @@ async function chargerTableau() {
     <div class="stat"><span>Total vendu</span><b>${eur2(r.total_vendu)}</b></div>
     <div class="stat fort"><span>Part association ${Math.round(r.taux * 100)} %</span><b>${eur2(r.part_asso)}</b></div>
     <div class="stat"><span>Part vendeurs</span><b>${eur2(r.part_vendeurs)}</b></div>
-    <div class="stat"><span>À vérifier · annulées</span><b>${r.a_verifier} · ${r.annulees}</b></div>`;
+    <div class="stat"><span>À vérifier · annulées</span><b>${r.a_verifier} · ${r.annulees}</b></div>
+    ${r.rembourse ? `<div class="stat"><span>Remboursé (retours)</span><b>${eur2(r.rembourse)}</b></div>` : ''}`;
   const cs = Object.keys(r.caisses).sort();
-  let te = 0, tc = 0, tv = 0;
+  let te = 0, tc = 0, tk = 0, tv = 0;
   $('caisses').innerHTML = cs.map(c => {
-    const k = r.caisses[c], e = k.especes || 0, ch = k.cheque || 0;
-    te += e; tc += ch; tv += k.ventes;
-    return `<tr><td>Caisse ${esc(c)}</td><td class="d">${k.ventes}</td><td class="d">${eur2(e)}</td><td class="d">${eur2(ch)}</td><td class="d"><b>${eur2(e + ch)}</b></td></tr>`;
-  }).join('') + (cs.length ? `<tr><td><b>Total</b></td><td class="d">${tv}</td><td class="d"><b>${eur2(te)}</b></td><td class="d"><b>${eur2(tc)}</b></td><td class="d"><b>${eur2(te + tc)}</b></td></tr>`
-    : '<tr><td colspan="5" class="note">Aucune vente.</td></tr>');
-  $('maj').textContent = 'à jour ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const k = r.caisses[c], e = k.especes || 0, ch = k.cheque || 0, ca = k.carte || 0;
+    te += e; tc += ch; tk += ca; tv += k.ventes;
+    return `<tr><td>Caisse ${esc(c)}</td><td class="d">${k.ventes}</td><td class="d">${eur2(e)}</td><td class="d">${eur2(ch)}</td><td class="d">${eur2(ca)}</td><td class="d"><b>${eur2(e + ch + ca)}</b></td></tr>`;
+  }).join('') + (cs.length ? `<tr><td><b>Total</b></td><td class="d">${tv}</td><td class="d"><b>${eur2(te)}</b></td><td class="d"><b>${eur2(tc)}</b></td><td class="d"><b>${eur2(tk)}</b></td><td class="d"><b>${eur2(te + tc + tk)}</b></td></tr>`
+    : '<tr><td colspan="6" class="note">Aucune vente.</td></tr>');
+  $('maj').textContent = 'à jour ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) + (r.version ? ' · serveur v' + r.version : '');
 }
 
 // ---------- Ventes ----------
@@ -189,13 +190,35 @@ async function chargerVentes() {
   $('ventes').innerHTML = r.ventes.map(v => {
     const st = v.statut === 'annulee' ? `<span class="tag t-n" title="${esc(v.motif)}">annulée</span>`
       : v.statut === 'a_verifier' ? `<span class="tag t-err" title="${esc(v.anomalies)}">à vérifier</span>` : '<span class="tag t-ok">ok</span>';
-    return `<tr><td class="petit">${esc(heure(v.heure_caisse || v.recue_le))}</td><td>${esc(v.caisse)}</td><td>${v.paiement === 'cheque' ? 'Chèque' : 'Espèces'}</td>
-      <td class="petit">${esc(v.codes)}${v.anomalies ? `<br><span style="color:var(--err)">${esc(v.anomalies)}</span>` : ''}</td>
-      <td class="d"><b>${eur2(v.total)}</b>${v.total_caisse !== '' && Number(v.total_caisse) !== Number(v.total) ? `<br><span class="petit">encaissé ${eur2(v.total_caisse)}</span>` : ''}</td>
-      <td>${st}</td><td>${v.statut !== 'annulee' ? `<button class="btn mini" data-annuler="${esc(v.id)}">Annuler</button>` : ''}</td></tr>`;
+    const remb = Number(v.rembourse) || 0;
+    return `<tr><td class="petit">${esc(heure(v.heure_caisse || v.recue_le))}</td><td>${esc(v.caisse)}</td><td>${PAIEMENT[v.paiement] || esc(v.paiement)}</td>
+      <td class="petit">${esc(v.codes)}${v.anomalies ? `<br><span style="color:var(--err)">${esc(v.anomalies)}</span>` : ''}${v.retours ? `<br><span style="color:var(--warn)">Retour : ${esc(v.retours)}</span>` : ''}</td>
+      <td class="d"><b>${eur2(v.total - remb)}</b>${remb ? `<br><span class="petit">dont ${eur2(remb)} remboursés</span>` : ''}${v.total_caisse !== '' && Number(v.total_caisse) !== Number(v.total) ? `<br><span class="petit">encaissé ${eur2(v.total_caisse)}</span>` : ''}</td>
+      <td>${st}</td><td>${v.statut !== 'annulee' ? `<button class="btn mini" data-retour="${esc(v.id)}" data-codes="${esc(v.codes)}" data-paiement="${esc(v.paiement)}">Retour d'article</button> <button class="btn mini" data-annuler="${esc(v.id)}">Annuler tout</button>` : ''}</td></tr>`;
   }).join('') || '<tr><td colspan="7" class="note">Aucune vente.</td></tr>';
 }
+const PAIEMENT = { especes: 'Espèces', cheque: 'Chèque', carte: 'Carte' };
+
+// ---------- Retour d'un ou plusieurs articles d'une vente ----------
+async function retour(venteId, codesProposes, paiement, idMsg) {
+  const saisie = prompt(`Retour d'article(s) : le ou les jouets rapportés redeviennent « en vente ».\n` +
+    `Possible seulement tant que la grille du vendeur n'est pas restituée.\n\nCode(s) des articles rapportés :`, codesProposes);
+  if (saisie == null || !saisie.trim()) return;
+  const motif = prompt('Motif du retour (obligatoire) :');
+  if (motif == null) return;
+  if (motif.trim().length < 3) return msg(idMsg, 'err', 'Motif obligatoire (3 caractères minimum).');
+  const r = await appel('retour', { vente_id: venteId, codes: saisie, motif }, idMsg);
+  if (!r.ok) return false;
+  const comment = r.paiement === 'carte' ? 'par carte : remboursement partiel dans l\'appli SumUp (vente retrouvée par heure et montant)'
+    : r.paiement === 'cheque' ? 'au client (la vente avait été payée par chèque)' : 'en espèces';
+  msg(idMsg, 'ok', `Retour enregistré : rembourser ${eur2(r.rembourse)} ${comment}.` + (r.articles_restants ? '' : ' Tous les articles de la vente sont revenus : vente annulée.'));
+  toutCharger();
+  return true;
+}
+
 $('ventes').onclick = async e => {
+  const rb = e.target.closest('[data-retour]');
+  if (rb) return retour(rb.dataset.retour, rb.dataset.codes, rb.dataset.paiement, 'msgVentes');
   const b = e.target.closest('[data-annuler]'); if (!b) return;
   const motif = prompt('Annuler cette vente : les articles seront remis en vente.\n\nMotif (obligatoire) :');
   if (motif == null) return;
@@ -214,12 +237,21 @@ async function chercher() {
   const ETIQ = { vierge: 'non déposé', depose: 'en vente', vendu: 'vendu', restitue: 'rendu', donne: 'donné' };
   $('resultats').innerHTML = r.resultats.length ? `<thead><tr><th>Article</th><th>Description</th><th class="d">Prix</th><th>Statut</th><th></th></tr></thead><tbody>` +
     r.resultats.map(a => `<tr><td>${esc(a.code.replace(/^\d{2}-/, ''))}</td><td>${esc(a.description)}</td><td class="d">${eur(a.prix)}</td>
-      <td>${esc(ETIQ[a.statut] || a.statut)}${a.vente_id ? `<br><span class="petit note">${esc(a.vente_id).slice(0, 8)}…</span>` : ''}</td>
-      <td>${a.statut === 'vierge' || a.statut === 'depose' ? `<button class="btn mini" data-corriger="${esc(a.code)}" data-prix="${a.prix == null ? '' : a.prix}">Corriger le prix</button>` : ''}</td></tr>`).join('') + '</tbody>' : '';
+      <td>${esc(ETIQ[a.statut] || a.statut)}${a.vente ? `<br><span class="petit note">${esc(heure(a.vente.heure))} · caisse ${esc(a.vente.caisse)} · ${PAIEMENT[a.vente.paiement] || esc(a.vente.paiement)}</span>` : ''}</td>
+      <td>${a.statut === 'vierge' || a.statut === 'depose' ? `<button class="btn mini" data-corriger="${esc(a.code)}" data-prix="${a.prix == null ? '' : a.prix}">Corriger le prix</button>`
+        : a.statut === 'vendu' && a.vente ? (a.grille_restituee ? '<span class="petit note">vendeur déjà payé</span>'
+          : `<button class="btn mini" data-retour="${esc(a.vente.id)}" data-codes="${esc(a.code.replace(/^\d{2}-/, ''))}">Retour</button>`) : ''}</td></tr>`).join('') + '</tbody>' : '';
 }
 $('chercheBtn').onclick = chercher;
 $('chercheIn').onkeydown = e => { if (e.key === 'Enter') chercher(); };
 $('resultats').onclick = async e => {
+  const rb = e.target.closest('[data-retour]');
+  if (rb) {
+    if (await retour(rb.dataset.retour, rb.dataset.codes, '', 'msgCherche')) {
+      const texte = $('msgCherche').textContent; await chercher(); msg('msgCherche', 'ok', texte);
+    }
+    return;
+  }
   const b = e.target.closest('[data-corriger]'); if (!b) return;
   const court = b.dataset.corriger.replace(/^\d{2}-/, '');
   const prix = prompt(`Nouveau prix pour ${court} (actuel : ${b.dataset.prix ? b.dataset.prix + ' €' : 'aucun'}) :`);
@@ -323,10 +355,10 @@ async function chargerJournal() {
 
 async function toutCharger() { await Promise.all([chargerTableau(), chargerVentes(), chargerJournal()]); }
 $('rafraichir').onclick = toutCharger;
-$('quitter').onclick = () => BJ.deconnexion('pinAdmin');
+$('quitter').onclick = () => BJ.deconnexion('jetonAdmin');
 
 // ---------- Démarrage ----------
-const r = await BJ.connexion({ titre: 'Admin', roles: ['admin'], cle: 'pinAdmin', session: true, nomCode: 'admin' });
+const r = await BJ.connexion({ titre: 'Admin', roles: ['admin'], cle: 'jetonAdmin', session: true, nomCode: 'admin' });
 mode = r.mode; edition = r.edition; afficherModes();
 await toutCharger();
 setInterval(() => { if (!document.hidden) { chargerTableau(); chargerVentes(); } }, 30000);

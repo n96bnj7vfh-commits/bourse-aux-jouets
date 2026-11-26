@@ -35,7 +35,8 @@ input:focus-visible, button:focus-visible, select:focus-visible { outline: 3px s
 
 /* En-tête des écrans */
 .entete { position: sticky; top: 0; z-index: 5; background: var(--ink); color: #fff; padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.entete h1 { font-size: 19px; flex: 1; }
+.entete h1 { font-size: 19px; flex: 1 0 auto; white-space: nowrap; } /* le titre ne se fait jamais écraser par les pastilles */
+@media (max-width: 430px) { .entete #mode { display: none; } } /* téléphone : en-tête sur une ligne (le mode est rappelé par les fenêtres « fermé ») */
 .entete a, .entete button.lien { color: #fff; opacity: .8; font-size: 14px; background: none; border: 0; cursor: pointer; text-decoration: underline; }
 .page { max-width: 1000px; margin: 0 auto; padding: 12px 14px 60px; display: grid; gap: 12px; }
 .saisie { display: flex; gap: 8px; margin-top: 6px; }
